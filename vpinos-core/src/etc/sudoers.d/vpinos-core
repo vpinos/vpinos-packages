@@ -19,6 +19,11 @@
 # style as vpinos-launch above.
 %sudo ALL=(ALL) NOPASSWD: /usr/bin/systemctl poweroff
 
+# vpinos-menu's Reboot option (systemctl reboot, not the whole
+# systemctl binary) -- same reasoning and same narrow scope as the
+# poweroff rule above.
+%sudo ALL=(ALL) NOPASSWD: /usr/bin/systemctl reboot
+
 # vpinos-menu's Network Settings option (nmtui, editing/activating
 # NetworkManager connections) -- confirmed directly against
 # NetworkManager's own shipped polkit policy
