@@ -1,3 +1,10 @@
+vpinos-core (1.1.1) trixie; urgency=medium
+
+  * Main menu: new r) Reboot option (with confirmation), plus a
+    passwordless sudoers rule scoped to `systemctl reboot` only.
+
+ -- Superhac <superhac007@gmail.com>  Wed, 14 Oct 2026 15:40:12 -0500
+
 vpinos-core (1.1.0) trixie; urgency=medium
 
   * First release: VPinOS customizations moved out of the ISO into an
