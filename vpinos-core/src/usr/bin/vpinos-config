@@ -1,0 +1,1055 @@
+#!/usr/bin/env python3
+# Cabinet configuration tool -- was vpinos-detect-monitors.py/"Monitor
+# Detection" in the menu, renamed once it grew well past just
+# monitors (VPinball Mode, Cabinet Autofit, Full DMD, Screen
+# Dimensions, vpinfe's own screen ids). Starts with the original
+# monitor-mapping piece: enumerate connected outputs via hyprctl, let the
+# cabinet builder click SHOW next to a monitor to display its info
+# fullscreen on the physical screen it actually is (so the output name
+# can be matched to a real screen), pick a role (Table/Backglass/DMD)
+# for each, and Save to write the
+# `workspace = N, monitor:NAME, default:true` lines into hyprland.conf's
+# vpinos-workspace-monitors block -- those lines, combined with the
+# per-title windowrules already in hyprland.conf (which route
+# vpinball's/vpinfe's own windows to workspace 1/2/3 by title), are what
+# actually puts Table/Backglass/DMD on the right physical screen. Also
+# has a last "VPinball Mode" option (Desktop/Cabinet) that Save writes
+# straight into vpinball's own VPinballX.ini (BGSet, plus
+# BackglassOutput/ScoreViewOutput based on which roles got assigned).
+# With more than one monitor, Save also writes vpinfe's own
+# tablescreenid/bgscreenid/dmdscreenid in vpinfe.ini to each role's
+# monitor ID. Selecting Cabinet mode reveals three more sections
+# (CabinetAutofitMode; a Full DMD on/off checkbox for
+# ScoreViewDMDOverlay/ScoreViewDMDAutoPos/B2SHideGrill; and
+# ScreenWidth/ScreenHeight/ScreenInclination), all written to
+# VPinballX.ini -- hidden entirely in Desktop mode, since VPinballX.ini's
+# own comments say they only matter in Cabinet mode. Save also always
+# sets Priority.ScoreView/PUP/B2SLegacyDMD to fixed values, regardless
+# of mode or role assignment.
+#
+# The UI is a small local web server (stdlib http.server only, no
+# dependencies) plus a plain HTML/JS/CSS page in /usr/share/vpinos/config-web/,
+# opened in `google-chrome --app=...` -- same look/feel as the sibling
+# tool vpxconfig, and for the same reason: Tk was clunky here (no native
+# Wayland backend, needed Xwayland; its Combobox popups got caught by
+# hyprland.conf's kiosk fullscreen windowrule, forcing radio-button
+# workarounds throughout).
+#
+# UNLIKE vpxconfig, this tool genuinely needs Hyprland already running
+# (every hyprctl call below) -- it is NOT a standalone server vpinos-menu
+# starts directly before Hyprland exists. It is vpinos-launch's CLIENT, same
+# role Chrome plays for vpxconfig and the old Tk GUI played here before
+# this rewrite: vpinos-launch starts Hyprland, waits for its Wayland socket,
+# then runs this script, which gets its monitor list via hyprctl, starts
+# its own HTTP server, and THEN spawns google-chrome itself (see main())
+# pointed at that server -- Chrome is this script's child, not
+# vpinos-launch's. Run via vpinos-menu option 1, or directly:
+#   /usr/bin/vpinos-launch vpinos-config /usr/bin/vpinos-config
+# vpinos-launch routes client_name "vpinos-config" to the windowed/floating
+# hyprland-installer.conf (same case arm as "vpxconfig"/"installer"),
+# not the kiosk config -- a config tool needs a visible, obvious way to
+# close it. vpinos-launch kills Hyprland once this script's process exits,
+# so main() waits for whichever of {Chrome, the HTTP server} stops
+# first and tears down the other before returning.
+import argparse
+import glob
+import json
+import mimetypes
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
+
+IDENT_SECONDS = 8
+MENU_WORKSPACE = 890
+HYPRLAND_CONF = "/etc/vpinos/hyprland.conf"
+BEGIN_MARKER = "# BEGIN vpinos-workspace-monitors"
+END_MARKER = "# END vpinos-workspace-monitors"
+# A second, separate marker block (explicit `monitor = ...` mode lines),
+# not folded into the block above -- that one is keyed by *role*
+# (Table/Backglass/DMD) and only ever covers monitors someone assigned a
+# role to; this one is keyed by *every detected output*, assigned or not,
+# so a connected-but-unused monitor still gets a real mode line instead of
+# Hyprland's own `preferred` auto-negotiation (see refresh_rates_for()'s
+# own comment for why that auto-negotiation isn't trustworthy on its own).
+MODE_BEGIN_MARKER = "# BEGIN vpinos-monitor-modes"
+MODE_END_MARKER = "# END vpinos-monitor-modes"
+# Fixed mapping, matches the per-title windowrules already in
+# hyprland.conf (VPinFE Table/vpinball Player -> workspace 1, etc.) --
+# not user-configurable, just which role goes on which workspace.
+ROLE_WORKSPACE = {"Table": 1, "Backglass": 2, "DMD": 3}
+
+VPX_BINARY = "/opt/vpinball/VPinballX_BGFX"
+VPX_INI_PATH = os.path.expanduser("~/.local/share/VPinballX/10.8/VPinballX.ini")
+
+# Cabinet-only extras (only meaningful once VPinball Mode = Cabinet --
+# see VPinballX.ini's own comments): value, display name, description.
+CABINET_AUTOFIT_OPTIONS = [
+    (
+        "0",
+        "Manual",
+        "No automatic fitting -- the table keeps its default view/camera position.",
+    ),
+    (
+        "1",
+        "Fit Table",
+        "Sizes the table to fill the width of your screen while keeping its true "
+        "proportions. Parts of the apron or the top of the playfield may be cut "
+        'off, and the flippers are placed at the height set by "Autofit Pos".',
+    ),
+    (
+        "2",
+        "Fit Screen",
+        "Stretches the table lengthwise so the whole thing fills your screen with "
+        "nothing cut off. The stretching makes round objects like the ball and "
+        "bumpers look slightly oval.",
+    ),
+]
+
+# key, display name, description -- Autofit needs these; VPinball itself
+# logs an error and does nothing if ScreenWidth/ScreenHeight are <= 1,
+# rather than something this tool needs to re-validate.
+SCREEN_DIMENSION_FIELDS = [
+    (
+        "ScreenWidth",
+        "Screen Width (cm)",
+        "The physical width, in cm, of the visible picture on your playfield "
+        "screen. Always measure the long side, even if the monitor lies sideways "
+        "in your cabinet. VPX uses it with Screen Height to size the table "
+        "correctly on your screen.",
+    ),
+    (
+        "ScreenHeight",
+        "Screen Height (cm)",
+        "The physical height, in cm, of the visible picture on your playfield "
+        "screen. Always measure the short side. Measure only the lit display "
+        "area, not the bezel.",
+    ),
+    (
+        "ScreenInclination",
+        "Screen Inclination (degrees)",
+        "How far, in degrees, your playfield screen is tilted from flat. 0 means "
+        "perfectly level, and positive values mean the back end, toward the "
+        "backbox, is raised. VPX uses it to correct the 3D perspective so the "
+        "table looks right from where you stand.",
+    ),
+]
+
+# Rendering options -- VPX's own [Player] settings for sync/framerate
+# behavior, not Cabinet-specific (unlike Autofit/Screen Dimensions/Full
+# DMD above): these affect Desktop play exactly the same way, so this
+# tool shows them regardless of VPinball Mode. value, display name,
+# description -- same shape as CABINET_AUTOFIT_OPTIONS, wording from
+# VPinballX.ini's own comments for SyncMode.
+SYNC_MODE_OPTIONS = [
+    ("0", "No Sync", "No synchronization."),
+    (
+        "1",
+        "Vertical Sync",
+        "Synchronize on video sync, avoids video tearing at the price of high "
+        "visual latency.",
+    ),
+    (
+        "2",
+        "Adaptive Sync",
+        "Synchronize on video sync, except for late frames (below target FPS), "
+        "also features higher visual latency.",
+    ),
+    (
+        "3",
+        "Frame Pacing",
+        "Paces the frame rendering to limit visual latency, comes with the risk "
+        "of introducing more stutters if the computer is not powerful enough.",
+    ),
+]
+
+MAX_FRAMERATE_FIELD = (
+    "MaxFramerate",
+    "Limit Framerate",
+    "-1 limits FPS to the display refresh rate. 0 does not limit the "
+    "framerate at all. Any other value limits FPS to it directly (lower "
+    "energy use/heat, more stable framerate) -- range -1 to 1000.",
+)
+
+MAX_PRERENDERED_FRAMES_OPTIONS = [
+    (
+        "1",
+        "1 (lowest latency)",
+        "Maximum number of 'frames in flight' (frames pushed to the GPU queue "
+        "waiting for rendering). Recommended to use the lowest value that "
+        "still gives a stable framerate -- higher values can raise FPS, but at "
+        "higher input latency. Not supported in the OpenGL renderer.",
+    ),
+    ("2", "2", ""),
+    ("3", "3 (highest FPS, highest latency)", ""),
+]
+
+# Single on/off toggle (Cabinet mode only) -- checked writes all three
+# keys as 1, unchecked writes all three as 0 (both states explicit, same
+# as BGSet/BackglassOutput/ScoreViewOutput above, so unchecking it after
+# a previous save actually takes effect instead of leaving stale 1s).
+# Description inferred from the key names, not supplied -- overlays the
+# DMD content onto the backglass with automatic positioning, and hides
+# the backglass image's own printed DMD grill graphic (for a real
+# physical DMD/no separate DMD window, rather than a 3-screen setup).
+FULLDMD_KEYS = ["ScoreViewDMDOverlay", "ScoreViewDMDAutoPos", "B2SHideGrill"]
+FULLDMD_SECTION = "Plugin.B2SLegacy"
+FULLDMD_DESCRIPTION = (
+    "Overlays the DMD content directly onto the backglass image with automatic "
+    "positioning, and hides the backglass image's own printed DMD grill graphic "
+    "-- for a real physical DMD device, not a separate DMD monitor/window."
+)
+
+VPINFE_INI_PATH = os.path.expanduser("~/.config/vpinfe/vpinfe.ini")
+VPINFE_INI_KEY = {"Table": "tablescreenid", "Backglass": "bgscreenid", "DMD": "dmdscreenid"}
+
+
+def ensure_instance_signature():
+    # hyprctl needs HYPRLAND_INSTANCE_SIGNATURE to find Hyprland's IPC
+    # socket -- Hyprland sets this on its own process and on anything IT
+    # execs (e.g. via `hyprctl dispatch exec`), but vpinos-launch's
+    # launch_client() only knows generic Wayland (WAYLAND_DISPLAY), not
+    # Hyprland specifically, and this script is a sibling of the `exec
+    # Hyprland` line, not its child, so it never inherits it. Confirmed
+    # directly: without this, hyprctl just fails with no monitors data.
+    # Only one Hyprland instance ever runs at a time in this project's
+    # architecture, so the single entry under .../hypr/ is always the
+    # right one.
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    matches = glob.glob(os.path.join(runtime_dir, "hypr", "*", ".socket.sock"))
+    if not matches:
+        return
+    signature = os.path.basename(os.path.dirname(matches[0]))
+    os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = signature
+
+
+def hyprctl_json(*args):
+    proc = subprocess.run(["hyprctl", "-j", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or "hyprctl failed"
+        raise RuntimeError(detail)
+    return json.loads(proc.stdout)
+
+
+def hyprctl(*args):
+    subprocess.run(["hyprctl", *args], capture_output=True, text=True, check=False)
+
+
+def hyprctl_result(*args):
+    # Same call as hyprctl() above, but reports success/failure instead of
+    # discarding it -- used only where a caller actually wants to surface
+    # a reload failure to the user (the Save endpoint's status line),
+    # not for the fire-and-forget dispatch calls elsewhere in this file.
+    proc = subprocess.run(["hyprctl", *args], capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"hyprctl {' '.join(args)} failed"
+        return False, detail
+    return True, proc.stdout.strip()
+
+
+def get_monitors():
+    return hyprctl_json("monitors")
+
+
+def geometry_of(mon):
+    return f"{mon['width']}x{mon['height']}@{mon['refreshRate']:.2f} at {mon['x']},{mon['y']}"
+
+
+def switch_to(monitor_name, workspace_id):
+    hyprctl("dispatch", "focusmonitor", monitor_name)
+    hyprctl("dispatch", "workspace", str(workspace_id))
+
+
+def show_monitor(mon, seconds, on_done):
+    # Switches the target monitor to its own scratch workspace (hiding
+    # whatever's on it -- for the menu's own monitor, that's the menu
+    # itself, which is what makes it disappear while the identifier is
+    # up) and execs a fullscreen `foot` there for `seconds`, then calls
+    # `on_done` -- the caller is responsible for switching back
+    # afterward, since only it knows where the menu itself lives.
+    name = mon["name"]
+    ws_id = 900 + mon["id"]
+    switch_to(name, ws_id)
+    body = (
+        "clear; printf '\\n\\n"
+        f"   MONITOR: {name}\\n"
+        f"   {mon.get('description', '')}\\n"
+        f"   {geometry_of(mon)}\\n\\n"
+        f"   Closing in {seconds} seconds...\\n"
+        "'; "
+        f"sleep {seconds}"
+    )
+    subprocess.Popen(
+        [
+            "hyprctl",
+            "dispatch",
+            "exec",
+            f'foot -T vpinos-ident-{name} -e sh -c "{body}"',
+        ]
+    )
+    on_done(seconds)
+
+
+def build_workspace_lines(role_to_monitor):
+    # `default:true` marks which workspace a monitor starts on --
+    # only workspace 1 (Table) should carry it, per request; workspaces
+    # 2/3 (Backglass/DMD) are only ever reached via the per-title
+    # windowrules' own `workspace = N silent`, never a fresh startup
+    # default.
+    lines = []
+    for role, ws in sorted(ROLE_WORKSPACE.items(), key=lambda kv: kv[1]):
+        name = role_to_monitor.get(role)
+        if name:
+            suffix = ", default:true" if ws == 1 else ""
+            lines.append(f"workspace = {ws}, monitor:{name}{suffix}")
+    return lines
+
+
+def parse_existing_roles():
+    # Pre-fills each monitor's dropdown from whatever's already saved in
+    # hyprland.conf, so reopening this tool doesn't lose a prior choice.
+    try:
+        with open(HYPRLAND_CONF) as f:
+            content = f.read()
+    except OSError:
+        return {}
+    start = content.find(BEGIN_MARKER)
+    end = content.find(END_MARKER)
+    if start == -1 or end == -1 or end < start:
+        return {}
+    body = content[start + len(BEGIN_MARKER) : end]
+    ws_to_role = {ws: role for role, ws in ROLE_WORKSPACE.items()}
+    result = {}
+    for line in body.splitlines():
+        m = re.match(r"\s*workspace\s*=\s*(\d+)\s*,\s*monitor:([^\s,]+)", line)
+        if not m:
+            continue
+        role = ws_to_role.get(int(m.group(1)))
+        if role:
+            result[m.group(2)] = role
+    return result
+
+
+def save_marker_block(begin_marker, end_marker, lines):
+    with open(HYPRLAND_CONF) as f:
+        content = f.read()
+    start = content.find(begin_marker)
+    end = content.find(end_marker)
+    if start == -1 or end == -1 or end < start:
+        raise RuntimeError(
+            f"couldn't find the {begin_marker} / {end_marker} markers in {HYPRLAND_CONF}"
+        )
+    start_of_body = start + len(begin_marker)
+    body = "\n" + ("\n".join(lines) + "\n" if lines else "")
+    new_content = content[:start_of_body] + body + content[end:]
+    with open(HYPRLAND_CONF, "w") as f:
+        f.write(new_content)
+
+
+def save_workspace_lines(lines):
+    save_marker_block(BEGIN_MARKER, END_MARKER, lines)
+
+
+# ---- monitor modes (resolution/refresh rate) --------------------------------
+def refresh_rates_for(mon):
+    # Hyprland's own `availableModes` (confirmed present in this exact
+    # shipped build via `strings` on /usr/bin/Hyprland: the JSON field and
+    # its "{}x{}@{:.2f}Hz" format string are both in the binary) lists
+    # every mode the display's EDID actually advertises -- not just
+    # whichever one Hyprland picked as current. Only the rates available
+    # at the CURRENT resolution are offered here; this tool doesn't let
+    # you change resolution, only which refresh rate to run it at.
+    width, height = mon.get("width"), mon.get("height")
+    rates = []
+    pattern = re.compile(rf"^{width}x{height}@([\d.]+)Hz$")
+    for mode in mon.get("availableModes", []) or []:
+        m = pattern.match(mode)
+        if m:
+            rate = round(float(m[1]), 2)
+            if rate not in rates:
+                rates.append(rate)
+    if not rates:
+        # No availableModes data (older Hyprland, or a virtual/headless
+        # output) -- fall back to just the single rate Hyprland reports
+        # as current, so there's always at least one option to show.
+        rates = [round(mon.get("refreshRate", 60.0), 2)]
+    rates.sort(reverse=True)
+    return rates
+
+
+def current_rate_of(mon):
+    # `refreshRate` (the currently active mode) is reported to 5 decimal
+    # places, availableModes entries to 2 -- round both the same way
+    # before comparing, or an exact string/float match would never hit.
+    return round(mon.get("refreshRate", 60.0), 2)
+
+
+def parse_existing_modes():
+    # Same idea as parse_existing_roles(): pre-fill each monitor's
+    # refresh-rate choice from whatever's already saved, so reopening
+    # this tool doesn't reset a prior choice back to "whatever's current".
+    try:
+        with open(HYPRLAND_CONF) as f:
+            content = f.read()
+    except OSError:
+        return {}
+    start = content.find(MODE_BEGIN_MARKER)
+    end = content.find(MODE_END_MARKER)
+    if start == -1 or end == -1 or end < start:
+        return {}
+    body = content[start + len(MODE_BEGIN_MARKER) : end]
+    result = {}
+    for line in body.splitlines():
+        m = re.match(r"\s*monitor\s*=\s*([^\s,]+)\s*,\s*\d+x\d+@([\d.]+)\s*,", line)
+        if m:
+            result[m.group(1)] = round(float(m.group(2)), 2)
+    return result
+
+
+def build_monitor_mode_lines(monitors, chosen_rates):
+    # One line per *detected* monitor, not just role-assigned ones (see
+    # MODE_BEGIN_MARKER's own comment for why) -- resolution@refresh is
+    # the only thing this tool actually lets you choose; position is
+    # "auto", not a frozen x/y snapshot (see below for why); scale is
+    # always 1 -- no display scaling, period (see below for why that's
+    # not just "whatever Hyprland happens to have").
+    #
+    # Position: `"auto"` (confirmed a real, valid literal via `strings`
+    # on this exact shipped Hyprland binary: "position = \"auto\"", plus
+    # the auto-up/auto-down/auto-left/auto-right/auto-center-* variants),
+    # not each monitor's current `x`/`y` echoed back as a literal number.
+    # Tried the literal-echo approach first and hit a real, reproduced
+    # failure: "Your monitor layout is set up incorrectly. Monitor {name}
+    # overlaps with other monitor(s) in the layout." (confirmed this
+    # exact message lives in Hyprland's own CCompositor::
+    # checkMonitorOverlaps()). Root cause: a monitor's logical position
+    # is a DERIVED quantity -- a function of every monitor's scale
+    # together, not independent per-monitor data -- and Hyprland's own
+    # auto-arrangement is what guarantees those derived positions never
+    # overlap. Freezing a snapshot of it as a literal number throws that
+    # guarantee away; "auto" keeps it, while still locking in the
+    # resolution/refresh rate this tool actually cares about.
+    #
+    # Scale: hardcoded `1`, NOT `mon["scale"]` echoed back -- an earlier
+    # version did echo it back, reasoning that Hyprland's `x`/`y` are
+    # reported in logical (post-scale) coordinates so forcing scale=1
+    # would make a monitor's own logical footprint wrong relative to
+    # that position. True as far as it went, but it missed the actual
+    # problem: a monitor with broken/missing EDID physical-size data
+    # (confirmed directly: `physical size (mm): 0x0` on a real "Audio
+    # Processing Technology Ltd HDMI" monitor) makes Hyprland's own
+    # auto-scale heuristic guess badly -- it picked 2x for a plain
+    # 1920x1080 display with no real basis for it. Echoing that back
+    # into an explicit, permanent `monitor=` line turned a one-time bad
+    # guess into a sticky setting that every future save just
+    # re-confirmed, and halved that monitor's usable logical space in
+    # the process (1920 logical px became 960) -- confirmed directly as
+    # the actual cause of the REFRESH RATE column needing ever-tighter
+    # layout squeezing earlier in this same feature's development.
+    # Requested directly: no display scaling at all. Position="auto"
+    # (above) means forcing scale=1 here doesn't risk reintroducing the
+    # overlap bug either -- Hyprland just recomputes a wider auto-laid-
+    # out desktop from these new, larger footprints.
+    lines = []
+    for mon in monitors:
+        rate = chosen_rates.get(mon["name"], current_rate_of(mon))
+        lines.append(f"monitor = {mon['name']}, {mon['width']}x{mon['height']}@{rate:.2f}, auto, 1")
+    return lines
+
+
+def ensure_vpinballx_ini():
+    # First run (or a freshly-installed cabinet) has no ini yet --
+    # vpinball only writes its defaults out on its own, so there's
+    # nothing to edit until it's been run at least once. `-h` (just
+    # prints help and exits) is enough to trigger that write without
+    # actually opening a table or a window.
+    if os.path.exists(VPX_INI_PATH):
+        return
+    os.makedirs(os.path.dirname(VPX_INI_PATH), exist_ok=True)
+    subprocess.run([VPX_BINARY, "-h"], capture_output=True, text=True, check=False)
+    if not os.path.exists(VPX_INI_PATH):
+        raise RuntimeError(f"{VPX_INI_PATH} still missing after running {VPX_BINARY} -h")
+
+
+def set_ini_value(content, key, value):
+    # Plain text substitution, not configparser -- vpinball's own ini
+    # has many sections and configparser would need to know which one
+    # each key lives in (and risks reshuffling/dropping comments on a
+    # rewrite). vpinball generates the file itself via `-h` first (see
+    # ensure_vpinballx_ini), so these keys already exist with their
+    # defaults by the time this runs -- a straight in-place replace of
+    # the existing line, keyed off the exact key name.
+    #
+    # The "key not found" fallback below appends to the very *end* of
+    # the file, with no awareness of `[Section]` headers at all --
+    # confirmed directly this is wrong for a key vpinball's own
+    # defaults don't already include: it lands after whatever the
+    # *last* section in the file happens to be, not necessarily the
+    # section vpinball actually reads that key from, so vpinball
+    # silently never sees it. Safe only for keys already present in
+    # vpinball's own generated defaults (confirmed for everything this
+    # tool sets except Priority.*, which needs
+    # set_ini_value_in_section instead -- see there for why).
+    pattern = re.compile(rf"^([ \t]*{re.escape(key)}[ \t]*=[ \t]*).*$", re.IGNORECASE | re.MULTILINE)
+    new_content, count = pattern.subn(rf"\g<1>{value}", content, count=1)
+    if count == 0:
+        sep = "" if not content or content.endswith("\n") else "\n"
+        new_content = f"{content}{sep}{key} = {value}\n"
+    return new_content
+
+
+def set_ini_value_in_section(content, section, key, value):
+    # Same in-place replace as set_ini_value if the key already exists
+    # anywhere in the file. If it doesn't, though -- confirmed directly
+    # on a real boot: Priority.ScoreView/PUP/B2SLegacyDMD aren't part of
+    # vpinball's own auto-generated defaults, so set_ini_value's blind
+    # end-of-file append landed them under the wrong section entirely,
+    # and vpinball silently never applied them -- insert a fresh line
+    # right after the `[section]` header instead (creating that section
+    # at the end of the file if it's missing too), so a brand-new key
+    # actually lands where vpinball expects to find it.
+    pattern = re.compile(rf"^([ \t]*{re.escape(key)}[ \t]*=[ \t]*).*$", re.IGNORECASE | re.MULTILINE)
+    new_content, count = pattern.subn(rf"\g<1>{value}", content, count=1)
+    if count > 0:
+        return new_content
+
+    section_pattern = re.compile(rf"^\[{re.escape(section)}\][ \t]*\r?$", re.IGNORECASE | re.MULTILINE)
+    m = section_pattern.search(content)
+    if m:
+        insert_at = m.end()
+        # Land right after the section header's own newline, not mid-line.
+        newline_at = content.find("\n", insert_at)
+        insert_at = newline_at + 1 if newline_at != -1 else len(content)
+        return content[:insert_at] + f"{key} = {value}\n" + content[insert_at:]
+
+    sep = "" if not content or content.endswith("\n") else "\n"
+    return f"{content}{sep}\n[{section}]\n{key} = {value}\n"
+
+
+def parse_existing_vpinball_mode():
+    # Pre-fills the Desktop/Cabinet radio buttons from whatever's
+    # already in VPinballX.ini, same idea as parse_existing_roles()
+    # above -- reopening the tool shouldn't lose a prior choice.
+    try:
+        with open(VPX_INI_PATH) as f:
+            content = f.read()
+    except OSError:
+        return "Desktop"
+    m = re.search(r"^[ \t]*BGSet[ \t]*=[ \t]*(\d+)", content, re.IGNORECASE | re.MULTILINE)
+    return "Cabinet" if m and m.group(1).strip() == "1" else "Desktop"
+
+
+def parse_existing_cabinet_autofit_mode():
+    try:
+        with open(VPX_INI_PATH) as f:
+            content = f.read()
+    except OSError:
+        return "0"
+    m = re.search(r"^[ \t]*CabinetAutofitMode[ \t]*=[ \t]*(\d+)", content, re.IGNORECASE | re.MULTILINE)
+    value = m.group(1) if m else "0"
+    return value if value in ("0", "1", "2") else "0"
+
+
+def parse_existing_sync_mode():
+    # "3" (Frame Pacing) when blank/missing -- matches VPX's own
+    # documented default for this key, not an arbitrary choice.
+    try:
+        with open(VPX_INI_PATH) as f:
+            content = f.read()
+    except OSError:
+        return "3"
+    m = re.search(r"^[ \t]*SyncMode[ \t]*=[ \t]*(\d+)", content, re.IGNORECASE | re.MULTILINE)
+    value = m.group(1) if m else "3"
+    return value if value in ("0", "1", "2", "3") else "3"
+
+
+def parse_existing_max_prerendered_frames():
+    # "1" when blank/missing -- matches VPX's own documented default.
+    try:
+        with open(VPX_INI_PATH) as f:
+            content = f.read()
+    except OSError:
+        return "1"
+    m = re.search(r"^[ \t]*MaxPrerenderedFrames[ \t]*=[ \t]*(\d+)", content, re.IGNORECASE | re.MULTILINE)
+    value = m.group(1) if m else "1"
+    return value if value in ("1", "2", "3") else "1"
+
+
+def parse_existing_screen_field(key):
+    try:
+        with open(VPX_INI_PATH) as f:
+            content = f.read()
+    except OSError:
+        return ""
+    m = re.search(rf"^[ \t]*{re.escape(key)}[ \t]*=[ \t]*(\S*)", content, re.IGNORECASE | re.MULTILINE)
+    return m.group(1) if m else ""
+
+
+def parse_existing_fulldmd():
+    # "On" only if every key is already 1 -- a partial/mixed state (e.g.
+    # hand-edited) is treated as off, not guessed at.
+    try:
+        with open(VPX_INI_PATH) as f:
+            content = f.read()
+    except OSError:
+        return False
+    for key in FULLDMD_KEYS:
+        m = re.search(rf"^[ \t]*{re.escape(key)}[ \t]*=[ \t]*(\d+)", content, re.IGNORECASE | re.MULTILINE)
+        if not m or m.group(1).strip() != "1":
+            return False
+    return True
+
+
+def save_vpinball_settings(
+    mode, role_to_monitor, cabinet_autofit_mode=None, screen_fields=None, fulldmd=None,
+    sync_mode=None, max_framerate=None, max_prerendered_frames=None,
+):
+    ensure_vpinballx_ini()
+    with open(VPX_INI_PATH) as f:
+        content = f.read()
+    content = set_ini_value(content, "BGSet", 1 if mode == "Cabinet" else 0)
+    content = set_ini_value(content, "BackglassOutput", 1 if "Backglass" in role_to_monitor else 0)
+    content = set_ini_value(content, "ScoreViewOutput", 1 if "DMD" in role_to_monitor else 0)
+    # Fixed defaults every cabinet should have, regardless of
+    # Desktop/Cabinet mode or which roles are assigned -- requested
+    # directly, not derived from any other setting here. Not part of
+    # vpinball's own auto-generated defaults (confirmed directly: they
+    # never existed in the file, so set_ini_value's blind
+    # end-of-file-append silently misfiled them under the wrong
+    # section) -- all three go under [ScoreView] specifically.
+    content = set_ini_value_in_section(content, "ScoreView", "Priority.ScoreView", 1)
+    content = set_ini_value_in_section(content, "ScoreView", "Priority.PUP", 3)
+    content = set_ini_value_in_section(content, "ScoreView", "Priority.B2SLegacyDMD", 2)
+    # Rendering options -- written regardless of Desktop/Cabinet mode,
+    # unlike the Cabinet-only extras below: SyncMode/MaxFramerate/
+    # MaxPrerenderedFrames affect Desktop play exactly the same way, see
+    # SYNC_MODE_OPTIONS's own comment.
+    if sync_mode is not None:
+        content = set_ini_value(content, "SyncMode", sync_mode)
+    if max_framerate is not None:
+        max_framerate = max_framerate.strip()
+        if max_framerate:
+            content = set_ini_value(content, "MaxFramerate", max_framerate)
+    if max_prerendered_frames is not None:
+        content = set_ini_value(content, "MaxPrerenderedFrames", max_prerendered_frames)
+    # Cabinet-only extras -- left untouched entirely in Desktop mode
+    # rather than overwritten with blank/default values, since they
+    # only matter once Cabinet mode is actually selected.
+    if mode == "Cabinet":
+        if cabinet_autofit_mode is not None:
+            content = set_ini_value(content, "CabinetAutofitMode", cabinet_autofit_mode)
+        for key, value in (screen_fields or {}).items():
+            value = value.strip()
+            if value:
+                content = set_ini_value(content, key, value)
+        if fulldmd is not None:
+            # Not part of vpinball's own auto-generated defaults either
+            # (same issue as Priority.* above) -- go under
+            # [Plugin.B2SLegacy] specifically, confirmed by the user.
+            for key in FULLDMD_KEYS:
+                content = set_ini_value_in_section(
+                    content, FULLDMD_SECTION, key, 1 if fulldmd else 0
+                )
+    with open(VPX_INI_PATH, "w") as f:
+        f.write(content)
+
+
+def save_vpinfe_settings(role_to_monitor, id_by_monitor):
+    # Only called with more than one monitor detected -- with a single
+    # screen everything already renders there regardless of these ids,
+    # so there's nothing meaningful to set. vpinfe.ini ships baked into
+    # the image (home/vpinos/.config/vpinfe/), so unlike VPinballX.ini
+    # there's no "generate a default first" step -- if it's missing,
+    # that's a real problem worth surfacing, not something to paper
+    # over by writing a fresh file with unknown other defaults missing.
+    if not os.path.exists(VPINFE_INI_PATH):
+        raise RuntimeError(f"{VPINFE_INI_PATH} not found")
+    with open(VPINFE_INI_PATH) as f:
+        content = f.read()
+    for role, key in VPINFE_INI_KEY.items():
+        name = role_to_monitor.get(role)
+        if name:
+            content = set_ini_value(content, key, id_by_monitor[name])
+    with open(VPINFE_INI_PATH, "w") as f:
+        f.write(content)
+
+
+
+WEB = Path("/usr/share/vpinos/config-web")
+API_HEADER = "X-VPinOS-Config"  # required on POSTs -- forces a CORS preflight from other sites, same as vpxconfig
+
+
+class App:
+    # All server-side state for one running session. `monitors` is
+    # captured once at startup (same lifetime as the old Tk `ordered`
+    # list captured once at GUI startup) -- a hot-plugged monitor still
+    # needs a restart to be picked up, unchanged from before.
+    def __init__(self, monitors, menu_monitor):
+        self.monitors = monitors
+        self.menu_monitor = menu_monitor
+        self.lock = threading.Lock()
+        self.identifying = False
+
+    def meta(self):
+        # Static option lists/descriptions the page needs once, fetched
+        # at load -- keeps all the English copy server-side (single
+        # source of truth) instead of duplicating it in app.js.
+        return {
+            "roles": list(ROLE_WORKSPACE.keys()),
+            "identSeconds": IDENT_SECONDS,
+            "cabinetAutofitOptions": [
+                {"value": v, "name": n, "description": d} for v, n, d in CABINET_AUTOFIT_OPTIONS
+            ],
+            "screenDimensionFields": [
+                {"key": k, "name": n, "description": d} for k, n, d in SCREEN_DIMENSION_FIELDS
+            ],
+            "syncModeOptions": [
+                {"value": v, "name": n, "description": d} for v, n, d in SYNC_MODE_OPTIONS
+            ],
+            "maxFramerateField": {
+                "key": MAX_FRAMERATE_FIELD[0], "name": MAX_FRAMERATE_FIELD[1], "description": MAX_FRAMERATE_FIELD[2]
+            },
+            "maxPrerenderedFramesOptions": [
+                {"value": v, "name": n, "description": d} for v, n, d in MAX_PRERENDERED_FRAMES_OPTIONS
+            ],
+            "fulldmdDescription": FULLDMD_DESCRIPTION,
+        }
+
+    def state(self):
+        # Re-read fresh every call (cheap regex reads of two small
+        # files) rather than cached once -- reflects any out-of-band
+        # edits, and this is what pre-fills the page's fields.
+        existing_roles = parse_existing_roles()
+        existing_rates = parse_existing_modes()
+        monitors = []
+        for mon in self.monitors:
+            available_rates = refresh_rates_for(mon)
+            default_rate = existing_rates.get(mon["name"], current_rate_of(mon))
+            if default_rate not in available_rates:
+                default_rate = available_rates[0]
+            monitors.append(
+                {
+                    "name": mon["name"],
+                    "id": mon["id"],
+                    "description": mon.get("description", ""),
+                    "geometry": geometry_of(mon),
+                    "rates": available_rates,
+                    "rate": default_rate,
+                    "role": existing_roles.get(mon["name"], ""),
+                }
+            )
+        return {
+            "monitors": monitors,
+            "vpinballMode": parse_existing_vpinball_mode(),
+            "cabinetAutofitMode": parse_existing_cabinet_autofit_mode(),
+            "screenFields": {key: parse_existing_screen_field(key) for key, _, _ in SCREEN_DIMENSION_FIELDS},
+            "fulldmd": parse_existing_fulldmd(),
+            "syncMode": parse_existing_sync_mode(),
+            "maxFramerate": parse_existing_screen_field(MAX_FRAMERATE_FIELD[0]),
+            "maxPrerenderedFrames": parse_existing_max_prerendered_frames(),
+        }
+
+    def show(self, name):
+        mon = next((m for m in self.monitors if m["name"] == name), None)
+        if not mon:
+            return {"error": f"unknown monitor {name!r}"}
+        with self.lock:
+            if self.identifying:
+                return {"error": "already identifying a monitor"}
+            self.identifying = True
+
+        def on_done(seconds):
+            # The HTTP request returns immediately (show_monitor()'s own
+            # work is already fast/non-blocking); the delayed switch back
+            # to the menu monitor runs independently on a timer, same as
+            # Tk's root.after() did, just not tied to a widget/mainloop.
+            threading.Timer(seconds, self._return_from_show).start()
+
+        show_monitor(mon, IDENT_SECONDS, on_done)
+        return {"seconds": IDENT_SECONDS}
+
+    def _return_from_show(self):
+        switch_to(self.menu_monitor, MENU_WORKSPACE)
+        with self.lock:
+            self.identifying = False
+
+    def save(self, body):
+        # Direct port of the old Tk on_save() -- same validation order,
+        # same partial-write-on-error behavior (an error from a later
+        # step does not roll back files already written by an earlier
+        # one, same as before).
+        roles_by_monitor = body.get("roles") or {}
+        role_to_monitor = {}
+        conflicts = set()
+        for mon in self.monitors:
+            role = roles_by_monitor.get(mon["name"]) or ""
+            if not role:
+                continue
+            if role in role_to_monitor:
+                conflicts.add(role)
+            role_to_monitor[role] = mon["name"]
+        if conflicts:
+            return {"error": f"ERROR: {', '.join(sorted(conflicts))} assigned to more than one monitor."}
+
+        lines = build_workspace_lines(role_to_monitor)
+        try:
+            save_workspace_lines(lines)
+        except OSError as exc:
+            return {"error": f"ERROR saving hyprland.conf: {exc}"}
+        except RuntimeError as exc:
+            return {"error": f"ERROR: {exc}"}
+
+        # Every detected monitor, not just role-assigned ones (see
+        # MODE_BEGIN_MARKER's own comment).
+        rates_by_monitor = body.get("rates") or {}
+        chosen_rates = {}
+        for mon in self.monitors:
+            rate = rates_by_monitor.get(mon["name"])
+            chosen_rates[mon["name"]] = float(rate) if rate is not None else current_rate_of(mon)
+        try:
+            save_marker_block(
+                MODE_BEGIN_MARKER, MODE_END_MARKER, build_monitor_mode_lines(self.monitors, chosen_rates)
+            )
+        except OSError as exc:
+            return {"error": f"ERROR saving hyprland.conf: {exc}"}
+        except RuntimeError as exc:
+            return {"error": f"ERROR: {exc}"}
+
+        try:
+            save_vpinball_settings(
+                body.get("vpinballMode") or "Desktop",
+                role_to_monitor,
+                cabinet_autofit_mode=body.get("cabinetAutofitMode"),
+                screen_fields=body.get("screenFields") or {},
+                fulldmd=bool(body.get("fulldmd")),
+                sync_mode=body.get("syncMode"),
+                max_framerate=body.get("maxFramerate") or "",
+                max_prerendered_frames=body.get("maxPrerenderedFrames"),
+            )
+        except (OSError, RuntimeError) as exc:
+            return {"error": f"Saved hyprland.conf, but ERROR saving VPinballX.ini: {exc}"}
+
+        saved = "hyprland.conf and VPinballX.ini"
+        if len(self.monitors) > 1:
+            id_by_monitor = {mon["name"]: mon["id"] for mon in self.monitors}
+            try:
+                save_vpinfe_settings(role_to_monitor, id_by_monitor)
+                saved += " and vpinfe.ini"
+            except (OSError, RuntimeError) as exc:
+                return {"error": f"Saved {saved}, but ERROR saving vpinfe.ini: {exc}"}
+
+        ok, detail = hyprctl_result("reload")
+        if not ok:
+            return {"message": f"Saved to {saved}, but reload failed: {detail}"}
+        return {"message": f"Saved to {saved}, applied."}
+
+
+def make_handler(app, allowed_hosts, shutdown=None):
+    # Same hand-rolled routing/CSRF-header/shutdown pattern as vpxconfig's
+    # own vpxconfig/server.py -- see that file for the "why" (answer the
+    # /api/shutdown request before calling httpd.shutdown(), since calling
+    # it inline from the request thread deadlocks ThreadingHTTPServer).
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "VPinOSConfig"
+
+        def log_message(self, fmt, *args):
+            print(f"{self.address_string()} {fmt % args}")
+
+        def _send(self, code, body, ctype="application/json"):
+            data = body if isinstance(body, bytes) else json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _guard(self, write):
+            if allowed_hosts and self.headers.get("Host") not in allowed_hosts:
+                self._send(403, {"error": "unexpected Host header"})
+                return False
+            if write and not self.headers.get(API_HEADER):
+                self._send(403, {"error": f"missing {API_HEADER} header"})
+                return False
+            return True
+
+        def _body(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            return json.loads(self.rfile.read(n) or b"{}")
+
+        def do_GET(self):
+            if not self._guard(False):
+                return
+            path = urlsplit(self.path).path
+            if path == "/api/meta":
+                return self._send(200, app.meta())
+            if path == "/api/state":
+                return self._send(200, app.state())
+            self._static(path)
+
+        def do_POST(self):
+            if not self._guard(True):
+                return
+            if self.path == "/api/show":
+                result = app.show(self._body().get("name", ""))
+                return self._send(400 if "error" in result else 200, result)
+            if self.path == "/api/save":
+                result = app.save(self._body())
+                return self._send(400 if "error" in result else 200, result)
+            if self.path == "/api/shutdown" and shutdown:
+                self._send(200, {"ok": True})  # answer first, then stop, so the page can say so
+                self.wfile.flush()
+                shutdown()
+                return
+            self._send(404, {"error": "not found"})
+
+        def _static(self, path):
+            target = (WEB / ("index.html" if path == "/" else path.lstrip("/"))).resolve()
+            if WEB.resolve() not in target.parents or not target.is_file():
+                return self._send(404, {"error": "not found"})
+            ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+            self._send(200, target.read_bytes(), ctype)
+
+    return Handler
+
+
+def create_server(app, host, port):
+    loopback = host in ("127.0.0.1", "localhost", "::1")
+    allowed = set() if loopback else None  # filled in once the port is known
+    httpd = ThreadingHTTPServer((host, port), make_handler(app, allowed, shutdown=lambda: stop(httpd)))
+    if loopback:
+        allowed.update(
+            {f"localhost:{httpd.server_port}", f"127.0.0.1:{httpd.server_port}", f"[::1]:{httpd.server_port}"}
+        )
+    return httpd
+
+
+def stop(httpd):
+    # Same reasoning as vpxconfig's own stop(): shutdown() waits for the
+    # serving loop, so calling it from a request-handling thread would
+    # deadlock -- run it on its own thread instead.
+    threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+
+def run_with_chrome(httpd, host, port):
+    # This script is vpinos-launch's client (see the header comment for why),
+    # so it -- not vpinos-menu -- is responsible for putting a window
+    # on screen: run the HTTP server on a background thread, point
+    # google-chrome at it, then wait for whichever of {Chrome, the
+    # server} stops first and tear down the other, so vpinos-launch sees
+    # this process exit (and kills Hyprland) however the user quit --
+    # the page's own Quit button (POST /api/shutdown) or Chrome's own
+    # window-close button.
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+
+    # --app=URL (not --kiosk): a plain window with a title bar and close
+    # button, same reasoning as vpxconfig's own Chrome flags --
+    # --start-maximized fills the screen without suppressing that chrome.
+    chrome = subprocess.Popen(
+        [
+            "/usr/bin/google-chrome",
+            f"--app=http://{host}:{port}",
+            "--start-maximized",
+            "--no-first-run",
+            "--disable-session-crashed-bubble",
+            "--noerrdialogs",
+        ]
+    )
+
+    try:
+        while chrome.poll() is None and server_thread.is_alive():
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+
+    if chrome.poll() is None:
+        # The server stopped first (the page's own Quit button) -- close
+        # the browser window too, so Quit actually closes everything
+        # instead of leaving an orphaned "stopped" tab open.
+        chrome.terminate()
+        try:
+            chrome.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            chrome.kill()
+
+    if server_thread.is_alive():
+        # Chrome exited first (closed via its own window controls) --
+        # stop the server the same way /api/shutdown does.
+        stop(httpd)
+        server_thread.join(timeout=5)
+
+    httpd.server_close()
+
+
+def main():
+    ensure_instance_signature()
+    # Re-apply whatever's already saved in hyprland.conf (role/mode
+    # blocks included) before this tool ever reads monitor state, not
+    # only after Save. Confirmed directly as a real sequencing bug, not
+    # a rendering one: on a fresh boot (or any launch before this
+    # specific session has clicked Save once), Hyprland is still running
+    # whatever IT auto-detected on its own -- e.g. a bad 2x auto-scale
+    # guess from a monitor with broken EDID physical-size data (see
+    # build_monitor_mode_lines()'s own comment) -- because the fix only
+    # actually takes effect via the `hyprctl reload` Save triggers after
+    # writing the corrected config. Without this, the page opens into
+    # that stale, too-narrow layout and only corrects itself once the
+    # user saves, which looks exactly like a layout bug even though the
+    # generated config was already right. Harmless no-op if
+    # hyprland.conf already matches Hyprland's current live state.
+    hyprctl("reload")
+    try:
+        monitors = get_monitors()
+    except (RuntimeError, FileNotFoundError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        print(
+            "Is Hyprland running? Run this via:\n"
+            "  /usr/bin/vpinos-launch vpinos-config /usr/bin/vpinos-config",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not monitors:
+        print("hyprctl reported zero monitors.", file=sys.stderr)
+        sys.exit(1)
+
+    ordered = sorted(monitors, key=lambda m: m["id"])
+    menu_monitor = ordered[0]["name"]
+    # Switch to the menu's own scratch workspace before Chrome ever
+    # opens -- this runs before the server/Chrome are even started
+    # below, so it's guaranteed to have already happened by the time
+    # the browser window appears.
+    switch_to(menu_monitor, MENU_WORKSPACE)
+
+    print(f"Found {len(ordered)} monitor(s):\n")
+    for mon in ordered:
+        print(f"  {mon['name']} (ID {mon['id']}): {mon.get('description', '?')}")
+        print(f"      {geometry_of(mon)}")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=1112)
+    args = parser.parse_args()
+
+    app = App(ordered, menu_monitor)
+    try:
+        httpd = create_server(app, args.host, args.port)
+    except OSError as exc:
+        print(f"ERROR: couldn't start the server on {args.host}:{args.port}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"\nVPinOS Configuration: http://{args.host}:{httpd.server_port}")
+    run_with_chrome(httpd, args.host, httpd.server_port)
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()

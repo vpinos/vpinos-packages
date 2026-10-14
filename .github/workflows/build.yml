@@ -1,0 +1,29 @@
+name: Build packages
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build builder image
+        run: docker build -t vpinos-packages-builder .
+
+      - name: Build vpinos-core
+        run: ./build.sh vpinos-core
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: vpinos-packages
+          path: dist/
+          retention-days: 14

@@ -1,0 +1,75 @@
+#!/bin/sh
+set -e
+
+DEFAULTS=/usr/share/vpinos/defaults
+STAMPS=/var/lib/vpinos-core/seeded
+
+# Places one default from $DEFAULTS at its real path -- once, ever. A
+# stamp under $STAMPS records that it was placed, so later upgrades
+# never touch it again: not when it's been edited, and not when the
+# user deleted it. If the path already exists (and was never stamped)
+# it is left exactly as is and only stamped. These are not conffiles;
+# dpkg doesn't track them at all. A default added in a future version
+# has no stamp yet, so it still gets placed once on existing cabinets.
+#
+# seed <path> <owner:group> [mode]   (mode only for plain files)
+seed() {
+    dest=$1
+    owner=$2
+    mode=$3
+    stamp=$STAMPS$dest
+    [ -e "$stamp" ] && return 0
+    if [ ! -e "$dest" ]; then
+        cp -a "$DEFAULTS$dest" "$dest"
+        chown -R "$owner" "$dest"
+        [ -n "$mode" ] && chmod "$mode" "$dest"
+    fi
+    mkdir -p "$(dirname "$stamp")"
+    touch "$stamp"
+}
+
+case "$1" in
+    configure)
+        mkdir -p /etc/vpinos
+        # Root-owned: never written at runtime.
+        seed /etc/vpinos/hyprland-installer.conf root:root 0644
+
+        if getent passwd vpinos >/dev/null; then
+            # Written directly by vpinos-menu (boot-mode, gpu-driver) and
+            # vpinos-config (hyprland.conf's monitor block) as `vpinos`,
+            # no sudo -- user-facing choices, not a privilege boundary.
+            seed /etc/vpinos/boot-mode vpinos:vpinos 0644
+            seed /etc/vpinos/gpu-driver vpinos:vpinos 0644
+            seed /etc/vpinos/hyprland.conf vpinos:vpinos 0644
+
+            home=$(getent passwd vpinos | cut -d: -f6)
+            if [ -d "$home" ]; then
+                install -d -o vpinos -g vpinos "$home/.config" \
+                    "$home/.config/vpinfe" "$home/.config/vpinfe/themes"
+                seed "$home/.config/vpinfe/vpinfe.ini" vpinos:vpinos 0644
+                seed "$home/.config/vpinfe/themes/Revolution" vpinos:vpinos
+            fi
+
+            # The menu, launcher and fetch service append to these as
+            # `vpinos`; a non-root process can append to an existing
+            # writable file in /var/log but can't create one there.
+            for log in vpinos-launch vpinos-hyprland vpinos-menu vpinos-tables; do
+                if [ ! -e "/var/log/$log.log" ]; then
+                    touch "/var/log/$log.log"
+                    chown vpinos:vpinos "/var/log/$log.log"
+                fi
+            done
+        else
+            echo "vpinos-core: no 'vpinos' user -- skipping the cabinet defaults that belong to it" >&2
+        fi
+
+        # Pick up the getty/ssh drop-ins without a reboot.
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

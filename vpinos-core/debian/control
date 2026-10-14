@@ -1,0 +1,35 @@
+Source: vpinos-core
+Section: misc
+Priority: optional
+Maintainer: Superhac <superhac007@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Homepage: https://github.com/vpinos/vpinos-packages
+Rules-Requires-Root: no
+
+Package: vpinos-core
+Architecture: all
+Depends: ${misc:Depends},
+         vpinball,
+         vpinfe,
+         vpxconfig,
+         hyprland,
+         seatd,
+         foot,
+         python3,
+         python3-tk,
+         network-manager,
+         curl,
+         sudo,
+         pciutils
+Description: VPinOS cabinet customizations
+ The parts of VPinOS that make a Debian system a pinball cabinet: the
+ console menu (vpinos-menu), the Hyprland kiosk launcher (vpinos-launch),
+ the cabinet configuration tool (vpinos-config), their root helpers,
+ sudoers rules, systemd units and login hooks.
+ .
+ Also carries the default cabinet configuration (Hyprland configs, boot
+ mode, GPU driver choice, vpinfe settings and theme). Those are copied
+ into place once, on first install, and never modified by an upgrade.
+ .
+ Only installs on a system built from a VPinOS 1.1 or newer image.

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+# Seeded cabinet config (/etc/vpinos/*, ~vpinos/.config/vpinfe) is the
+# cabinet's own and stays even on purge; only the stamps go.
+case "$1" in
+    purge)
+        rm -rf /var/lib/vpinos-core
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

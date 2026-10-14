@@ -1,0 +1,448 @@
+#!/bin/sh
+# Starts Hyprland directly in the foreground of the calling shell (via
+# `exec`, at the bottom -- inherits its tty/session properly, matching
+# weston's old requirement and Hyprland's own documented launch method:
+# "going into a TTY and executing Hyprland", not a login manager -- see
+# `man hyprland`) and launches a given client as its client once the
+# Wayland socket is up. Run directly from an interactive shell (the
+# `vpinos` user for vpinball/vpinfe/Chrome -- seatd's default config
+# already grants DRM/seat access to `video`-group members, no root
+# needed; still `sudo`'d for the installer specifically, which genuinely
+# needs root for partitioning -- see vpinos-menu); not a systemd
+# service. (Was weston until this was migrated to Hyprland -- see
+# notes/vpinos.md step 5 for why, and for what carried over unchanged:
+# this whole tty-session-instead-of-a-service architecture, the client
+# wait/log/kill-on-exit mechanics below, none of that is Hyprland-
+# specific, just the compositor binary and its config files changed.)
+#
+# Usage: vpinos-launch <name-for-logging> <command> [args...]
+#   e.g. vpinos-launch vpinball /opt/vpinball/VPinballX_BGFX -play /opt/vpinball/assets/exampleTable.vpx
+#        vpinos-launch vpinfe /opt/vpinfe/vpinfe
+#
+# The name "windowed" is reserved: it gets the floating/decorated
+# Hyprland config (see hypr_config below) instead of the default kiosk
+# one, for launching whatever one-off third-party app needs a real
+# window on a given occasion, without having to add that app's own
+# name to vpinos-launch's hardcoded list (which stays for the few clients
+# this project itself always launches windowed: installer, vpxconfig,
+# vpinos-config).
+#   e.g. vpinos-launch windowed /opt/wivr/WiVR
+
+set -e
+
+client_name="${1:?usage: vpinos-launch <name> <command> [args...]}"
+shift
+
+# /run/user/<uid> rather than a custom root-owned path: for the normal
+# (non-installer) case this runs as `vpinos`, a real PAM-logged-in
+# user, whose /run/user/1000 already exists (pam_systemd) with correct
+# ownership -- mkdir/chmod here are then harmless no-ops. For the
+# installer, still run via `sudo` (root, uid 0): /run/user/0 typically
+# doesn't exist yet since root has no active login session, so this
+# creates it fresh. Same two lines handle both cases correctly since
+# they key off the actual effective uid rather than assuming which one
+# it is.
+runtime_dir="/run/user/$(id -u)"
+mkdir -p "$runtime_dir"
+chmod 0700 "$runtime_dir"
+export XDG_RUNTIME_DIR="$runtime_dir"
+
+log_file="/var/log/vpinos-launch.log"
+
+# Captured before `exec` replaces this process with Hyprland -- `exec`
+# keeps the same PID, so this is Hyprland's PID too, letting
+# launch_client (below) stop it once its client exits.
+compositor_pid=$$
+
+wait_for_glob() {
+    # Polls for a glob pattern to match a real file, up to ~30s.
+    # Prints the first match and returns 0, or prints nothing and
+    # returns 1 on timeout.
+    #
+    # Was ~10s (100 iterations) -- bumped after a real report of
+    # vpinos-launch's own "timed out waiting for the compositor's Wayland
+    # socket" message on real 3-monitor hardware. Not yet confirmed
+    # whether Hyprland there is genuinely hung or just slower than 10s
+    # to finish real multi-monitor output negotiation (EDID reads
+    # across 3 real displays, GSP firmware handshake on the proprietary
+    # NVIDIA driver, etc. all plausibly take longer than anything this
+    # project has tested against before) -- widening the window first,
+    # since a too-tight timeout would look identical to a real hang
+    # from here, and costs nothing if it turns out to be a real hang
+    # instead (same eventual failure, just reported ~20s later).
+    pattern="$1"
+    i=0
+    while [ "$i" -lt 300 ]; do
+        match=$(ls $pattern 2>/dev/null | head -n1)
+        if [ -n "$match" ]; then
+            echo "$match"
+            return 0
+        fi
+        sleep 0.1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+launch_client() {
+    # $@ here comes from the explicit args passed at the call site
+    # below (`launch_client "$@" &`) -- a shell function called with no
+    # arguments of its own does NOT inherit the script's positional
+    # parameters (confirmed directly: $@ comes back empty inside an
+    # argument-less call, in both dash and bash), so this isn't
+    # decoration.
+
+    # Stop the compositor whenever this subshell ends, not only on the
+    # normal "exited" path at the bottom -- a real report: VPX was gone,
+    # this function never logged "exited", and Hyprland sat there with
+    # no client, leaving the user on a blank screen (vpinos-menu waiting
+    # on it forever). Root cause still unknown; this is just the safety
+    # net. Also covers the wait_for_glob timeouts below, which used to
+    # return without stopping it. The signal traps route HUP/TERM
+    # through exit so the EXIT trap fires for those too (dash skips EXIT
+    # traps on a death by an untrapped signal); SIGKILL still can't be
+    # caught.
+    trap 'kill "$compositor_pid" 2>/dev/null || true' EXIT
+    trap 'exit 1' HUP TERM
+
+    if [ "$client_name" = "installer" ]; then
+        # calamares's Wayland support is unreliable -- confirmed
+        # directly under weston, not a guess: even with QT_QPA_PLATFORM=
+        # wayland forced and qt6-wayland installed, its main window
+        # rendered fine but its "Cancel Installation?" popup showed
+        # readable text with zero button/panel chrome (tried forcing
+        # QT_QUICK_CONTROLS_STYLE=Basic -- no change, tried
+        # QT_QUICK_BACKEND=software -- see vpinos.md for the full
+        # history), and a separate run crashed outright with a raw
+        # Xlib "Cannot open display" error -- something inside
+        # calamares calls XOpenDisplay() directly regardless of
+        # QT_QPA_PLATFORM. Two independent community workarounds for
+        # calamares-under-VM issues both target XCB specifically, not
+        # Wayland, which lines up. Giving it a real X11 display via
+        # Xwayland instead of continuing to chase Wayland-side fixes --
+        # not re-tested under Hyprland specifically, but nothing about
+        # this reasoning was weston-specific, and Hyprland's Xwayland
+        # support is the same protocol-level integration.
+        display_sock=$(wait_for_glob "/tmp/.X11-unix/X*") || {
+            echo "$(date -Is): vpinos-launch: timed out waiting for Xwayland's X11 socket" >>"$log_file"
+            return 1
+        }
+        export DISPLAY=":$(basename "$display_sock" | sed 's/^X//')"
+        export QT_QPA_PLATFORM=xcb
+        export QT_XCB_GLYPH_CACHE_WORKAROUND=1
+        display_label="DISPLAY=$DISPLAY"
+    else
+        sock=$(wait_for_glob "$runtime_dir/wayland-*.lock") || {
+            echo "$(date -Is): vpinos-launch: timed out waiting for the compositor's Wayland socket" >>"$log_file"
+            return 1
+        }
+        export WAYLAND_DISPLAY
+        WAYLAND_DISPLAY=$(basename "$sock" .lock)
+        export SDL_VIDEODRIVER=wayland
+        export GDK_BACKEND=wayland
+        display_label="WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+    fi
+
+    echo "$(date -Is): vpinos-launch: launching $client_name -- $display_label -- $*" >>"$log_file"
+    # stdbuf -oL -eL: output redirected to a file (not a terminal)
+    # normally switches C stdio from line-buffered to fully-buffered,
+    # so a long-running client's output just sits in memory until the
+    # buffer fills or the process exits -- confirmed directly: with a
+    # client that never exits and never says much, the log stayed
+    # empty (just the launch line above) even with WAYLAND_DEBUG=1 set,
+    # because nothing had triggered a flush yet. Forces line buffering
+    # instead so output actually lands in the log as it happens.
+    #
+    # set +e/-e around this call specifically: `set -e` is active for
+    # the whole script, and if the client returns ANY non-zero exit
+    # code, `set -e` aborts this entire function immediately and
+    # silently -- skipping both the "exited" log line below AND the
+    # kill "$compositor_pid" call after it. That was the actual root
+    # cause of every single "Chrome only" test showing nothing but the
+    # launch line, forever, no matter which Chrome flags were tried --
+    # none of those changes could ever have mattered if the script was
+    # dying before it could log anything about them. vpinball never hit
+    # this because it happens to exit 0.
+    set +e
+    case "$client_name" in
+        # Plain run, no stdbuf, for any client that spawns its OWN
+        # child process(es) -- confirmed directly as the actual cause of
+        # a real, reproduced bug in the installer specifically
+        # (reinstalling VPinOS onto a disk that had already been
+        # through one real install always failed with "The installer
+        # failed to create partition" / "sfdisk --force --append"
+        # failing, even though the partition was genuinely being
+        # created on disk successfully each time -- confirmed directly
+        # via `blkid` right after a "failed" attempt). Root cause:
+        # stdbuf works via LD_PRELOAD (see the env vars it sets --
+        # LD_PRELOAD=.../libstdbuf.so, _STDBUF_O, _STDBUF_E, confirmed
+        # directly by inspecting Calamares's own /proc/<pid>/environ
+        # while it sat on the failure dialog) -- and environment
+        # variables are inherited by every child process unless
+        # something explicitly strips them. Calamares spawns `sfdisk`
+        # as its own child for every partitioning operation, and that
+        # LD_PRELOAD was leaking straight into it, forcing a buffering
+        # library into a program never tested against it -- KPMcore's
+        # own success check for partition creation is a plain text
+        # search for "Created a new partition" in sfdisk's captured
+        # output, confirmed present and well-formed when the exact same
+        # sfdisk command was run by hand in a real terminal (which
+        # never goes through this stdbuf wrapper at all, and never hit
+        # the bug), so the leaked LD_PRELOAD's altered buffering
+        # behavior is the most likely explanation for that text getting
+        # lost/garbled specifically when Calamares ran it.
+        #
+        # That's one confirmed case, not a one-off: the same
+        # architecture (this client launches ITS OWN child process,
+        # inheriting whatever vpinos-launch gave this client) applies
+        # equally to installer (sfdisk), vpinfe/vpinfe-gamepadtest
+        # (hands off to vpinball when a table is launched), vpxconfig
+        # and vpinos-config (both spawn google-chrome via their
+        # --open-chrome-equivalent flow), and chrome itself (Chrome is
+        # a multi-process app that spawns its own renderer/GPU child
+        # processes internally) -- any of these could hit an equally
+        # subtle, hard-to-diagnose failure in whatever they spawn, so
+        # none of them get the LD_PRELOAD-setting stdbuf wrapper.
+        # "windowed" (an arbitrary third-party app, see top of file) is
+        # an unknown quantity by design -- whether it spawns children
+        # isn't knowable here, so it defaults to the same safe side as
+        # these rather than risk the same class of bug. wivrn-dashboard
+        # (vpinos-menu's VR menu) runs adb, and starts its own
+        # wivrn-server child if none is running. vpinball (run
+        # directly, not via vpinfe) and sysinfo are the only two with
+        # no known child-process-spawning behavior, so they're the
+        # only ones that still get prompt line-buffered logging below.
+        installer | vpinfe | vpinfe-gamepadtest | vpxconfig | vpinos-config | chrome | windowed | wivrn-dashboard)
+            "$@" >>"$log_file" 2>&1
+            ;;
+        *)
+            stdbuf -oL -eL "$@" >>"$log_file" 2>&1
+            ;;
+    esac
+    rc=$?
+    set -e
+    echo "$(date -Is): vpinos-launch: $client_name exited $rc, stopping the compositor" >>"$log_file"
+
+    # The compositor doesn't quit on its own just because its only
+    # client closed -- without this, exiting the client leaves a black
+    # screen (compositor still running, nothing to show) instead of
+    # returning to the menu.
+    kill "$compositor_pid" 2>/dev/null || true
+}
+
+# Switches which GPU kernel module is bound (per /etc/vpinos/gpu-driver,
+# see vpinos-menu's "GPU Driver" option) before anything graphical
+# starts -- the one point every client type already passes through, so
+# one call here covers all of them. `sudo` (scoped in
+# /etc/sudoers.d/vpinos): modprobe/rmmod need CAP_SYS_MODULE, which
+# `vpinos` doesn't have. Cheap/idempotent if nothing needs to change,
+# so unconditional on every launch rather than only when the installer
+# runs (which already has root) -- this applies identically whether
+# this invocation itself is root or not.
+sudo /usr/libexec/vpinos/vpinos-gpu-driver.sh
+
+# Multi-GPU exclusion of an unused Intel iGPU -- a real report,
+# confirmed directly over a live SSH session (not guessed, not
+# reproduced via any rebuild): a real cabinet PC with an Intel iGPU
+# (CPU/motherboard, driver i915, nothing physically connected to it --
+# confirmed via `lspci -k`) alongside a discrete GPU (the one actually
+# driving every monitor) hung/black-screened identically across every
+# client and every gpu-driver mode (nouveau AND nvidia). Root cause
+# confirmed via a direct SSH-launched vpinball run: BGFX fatally failed
+# to initialize while printing "MESA-INTEL: ... Ivy Bridge Vulkan
+# support is incomplete" immediately before the fatal error -- Intel's
+# own Vulkan driver, not the discrete GPU's, despite nothing being
+# connected to that GPU at all. This reframes the entire "nvidia black
+# screen" investigation above and in notes/nvidia-proprietary.md: the
+# actual root cause was never nvidia-driver-specific -- it reproduced
+# identically under plain nouveau too. None of this file's own
+# nvidia-only env vars above could ever have fixed it.
+#
+# Two separate things needed fixing, confirmed by testing each in
+# isolation over that same live SSH session before combining them:
+#   1. AQ_DRM_DEVICES (Hyprland's own Aquamarine backend env var,
+#      confirmed as a real key via `strings` on the shipped
+#      libaquamarine.so) -- controls which GPU(s) HYPRLAND ITSELF uses
+#      for compositing/KMS. Confirmed fixed in isolation first: a
+#      plain `foot` terminal (a simple Wayland client) rendered
+#      correctly once this alone was set, proving Hyprland had been
+#      choosing the Intel iGPU as its primary GPU.
+#   2. VK_ICD_FILENAMES (the Vulkan LOADER's own standard env var, not
+#      Hyprland-specific) -- controls which Vulkan ICDs a CLIENT's own
+#      direct `vkEnumeratePhysicalDevices()` call can even see.
+#      AQ_DRM_DEVICES alone did NOT fix vpinball, confirmed directly
+#      (foot worked, vpinball still failed with only AQ_DRM_DEVICES
+#      set) -- because vpinball (BGFX) does its own independent Vulkan
+#      device enumeration, completely bypassing whatever GPU Hyprland
+#      itself composites on. Restricting the loader to only the
+#      correct ICD stops it from ever seeing Intel's own
+#      (`intel_icd.json`/`intel_hasvk_icd.json`) at all. Confirmed
+#      fixed with both set together: vpinball actually launched and
+#      rendered a real table.
+#
+# Detected dynamically by real PCI vendor ID (confirmed via the PCI ID
+# database: 0x8086 = Intel, 0x10de = NVIDIA, 0x1002 = AMD) rather than
+# hardcoded card numbers or assumed PCI enumeration order -- neither is
+# guaranteed stable across boots or hardware. Only acts when BOTH an
+# Intel GPU AND some other (non-Intel) GPU are present -- a genuine
+# hybrid machine like this one -- and does nothing at all on a plain
+# single-GPU machine, this project's own main dev hardware (an AMD RX
+# 9060 XT with no separate Intel iGPU enabled) included, where
+# Hyprland/Vulkan's own single-device defaults are already correct and
+# shouldn't be second-guessed.
+#
+# Hybrid LAPTOPS are the opposite case: the built-in panel is wired to
+# the Intel iGPU and the discrete GPU has no display of its own -- a
+# real report (Raptor Lake iGPU + RTX 5060 Mobile, using the laptop's
+# own panel) black-screened/"locked up" under nvidia mode because
+# AQ_DRM_DEVICES pointed Hyprland at a GPU with nothing connected. So
+# Hyprland goes wherever the connected display actually is: Intel
+# when only Intel has one, the discrete GPU otherwise (the original
+# cabinet-PC case above, unchanged). VK_ICD_FILENAMES stays on the
+# discrete GPU either way, so vpinball still renders there and is
+# composited on Intel (PRIME).
+#
+# All of this runs BEFORE launch_client is forked below -- it used to
+# run after, so the client never actually inherited VK_ICD_FILENAMES
+# (only Hyprland did).
+has_connected_output() {
+    for status in /sys/class/drm/"$1"-*/status; do
+        [ "$(cat "$status" 2>/dev/null)" = "connected" ] && return 0
+    done
+    return 1
+}
+intel_card=""
+other_card=""
+other_vendor=""
+compositor_on_intel=0
+for card in /sys/class/drm/card[0-9]*; do
+    [ -e "$card/device/vendor" ] || continue
+    vendor=$(cat "$card/device/vendor" 2>/dev/null)
+    case "$vendor" in
+        0x8086) intel_card=$(basename "$card") ;;
+        *) other_card=$(basename "$card"); other_vendor="$vendor" ;;
+    esac
+done
+if [ -n "$intel_card" ] && [ -n "$other_card" ]; then
+    if has_connected_output "$intel_card" && ! has_connected_output "$other_card"; then
+        export AQ_DRM_DEVICES="/dev/dri/$intel_card"
+        compositor_on_intel=1
+    else
+        export AQ_DRM_DEVICES="/dev/dri/$other_card"
+    fi
+    echo "$(date -Is): vpinos-launch: hybrid GPUs intel=$intel_card other=$other_card ($other_vendor) -- compositor on $AQ_DRM_DEVICES" >>"$log_file"
+    case "$other_vendor" in
+        # NVIDIA: which Vulkan ICD is actually correct depends on
+        # gpu-driver mode, same split as this file's own nvidia-only
+        # env var block above.
+        0x10de)
+            if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = "nvidia" ]; then
+                export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+            else
+                export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nouveau_icd.json
+            fi
+            ;;
+        # AMD: this project has no proprietary-driver toggle for AMD,
+        # so RADV is always the right (only) choice.
+        0x1002)
+            export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
+            ;;
+    esac
+fi
+
+launch_client "$@" &
+
+# Nvidia-specific GL/EGL vendor env vars -- a real report, confirmed
+# directly, of vpxconfig's Tk UI rendering with invisible controls
+# (they'd only appear on hover, implying stale/uncomposited paint, not
+# a crash) with "nvidia" mode selected. This is the standard fix
+# documented at https://wiki.hypr.land/Nvidia/ for exactly this class
+# of symptom: without forcing glvnd to resolve to nvidia's own
+# GBM/EGL/GLX implementations, Xwayland/Tk can end up negotiating a
+# mismatched render path against the compositor. Gated on gpu-driver
+# mode (reading the same file vpinos-gpu-driver.sh just acted on --
+# its own process can't export back into this one) since GBM_BACKEND=
+# nvidia-drm specifically would break the default open-source Mesa/NVK
+# path for everyone else if set unconditionally.
+# __EGL_VENDOR_LIBRARY_FILENAMES points at a file confirmed present in
+# this image (/usr/share/glvnd/egl_vendor.d/10_nvidia.json, shipped by
+# the nvidia-driver packages installed in
+# 0120-install-nvidia-driver.hook.chroot).
+#
+# Skipped when Hyprland is compositing on the Intel iGPU instead (the
+# hybrid-laptop case above): forcing nvidia's GBM/EGL onto a compositor
+# running on an Intel device breaks it outright.
+#
+# Also skipped if nvidia_drm didn't actually load (Secure Boot rejecting
+# the unsigned module, a kernel mismatch, ...) -- forcing these with no
+# nvidia driver underneath hung Hyprland on a black screen.
+nvidia_ok=0
+if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = "nvidia" ]; then
+    if lsmod | grep -q '^nvidia_drm '; then
+        nvidia_ok=1
+    else
+        echo "$(date -Is): vpinos-launch: gpu-driver is nvidia but nvidia_drm isn't loaded (Secure Boot?) -- not forcing nvidia GBM/EGL" >>"$log_file"
+    fi
+fi
+if [ "$nvidia_ok" = 1 ] && [ "$compositor_on_intel" = 0 ]; then
+    export LIBVA_DRIVER_NAME=nvidia
+    export GBM_BACKEND=nvidia-drm
+    export __GLX_VENDOR_LIBRARY_NAME=nvidia
+    export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+fi
+
+# Xwayland (weston's own, and per Hyprland's docs its integration works
+# the same way) binds its X11 socket directly under /tmp/.X11-unix --
+# confirmed directly under weston (via a real crash) that it does NOT
+# create that directory itself, and failing to bind there was FATAL to
+# the whole compositor there, not just a gracefully-skipped X11 support.
+# This directory is normally created by systemd-tmpfiles at boot, but
+# isn't reliably present by the time this runs -- ensuring it directly
+# instead of depending on that ordering. Kept for Hyprland too, even
+# though this exact failure mode hasn't been independently reproduced
+# under it -- harmless either way, and cheap insurance against the same
+# class of bug.
+#
+# Tolerate failure on both: vpinball/vpinfe/Chrome now run as `vpinos`
+# (non-root), but the installer still runs as root via `sudo` -- if the
+# installer runs first in a boot session and creates this directory as
+# root, a later non-root chmod attempt here would fail (chmod requires
+# ownership or root) and abort the whole script under `set -e`. Safe to
+# ignore: the directory already being 1777 from that earlier root run
+# is exactly the state this line exists to guarantee anyway.
+mkdir -p /tmp/.X11-unix 2>/dev/null || true
+chmod 1777 /tmp/.X11-unix 2>/dev/null || true
+
+# The compositor's own output has never been captured anywhere -- it
+# inherits whatever tty ran this script, invisible once it paints over
+# that tty's console, the exact same problem solved for the client's
+# output above. Capturing it separately since its own diagnostics (e.g.
+# about how it's handling a client's surface) are a distinct signal
+# from the client's.
+#
+# The installer, vpxconfig and vpinos-config always get the windowed
+# config instead of the kiosk one, same as any caller using the
+# reserved "windowed" name (see top of file): the kiosk config forces
+# every toplevel fullscreen with no window chrome regardless of what
+# the app itself asks for (that's what stretched Calamares before it
+# got this same treatment under weston), which is right for
+# vpinball/vpinfe but wrong for a config tool -- or an arbitrary
+# windowed app -- the user needs a visible, obvious way to close. See
+# /etc/vpinos/hyprland-installer.conf.
+hypr_config=/etc/vpinos/hyprland.conf
+case "$client_name" in
+    installer | vpxconfig | vpinos-config | windowed) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
+esac
+
+# --i-am-really-stupid: Hyprland refuses to run as root without this
+# (confirmed in `man hyprland` -- "Omits root user privileges check").
+# Weston never had this restriction, so it's a new wrinkle this
+# migration introduced -- the installer is the only caller that ever
+# runs as root (via the sudo rule below), so it's the only case that
+# needs the flag; every other client stays unprivileged as `vpinos` and
+# doesn't need it. Not independently observed triggering the real
+# refusal message -- confirmed only that the flag exists and is
+# documented for exactly this purpose; verify on a real installer boot.
+hypr_flags=""
+[ "$client_name" = "installer" ] && hypr_flags="--i-am-really-stupid"
+exec /usr/bin/Hyprland $hypr_flags --config "$hypr_config" >>/var/log/vpinos-hyprland.log 2>&1

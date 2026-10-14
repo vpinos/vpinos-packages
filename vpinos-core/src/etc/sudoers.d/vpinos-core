@@ -1,0 +1,59 @@
+# On the live session, live-config grants its own `user` account
+# passwordless sudo (/etc/sudoers.d/live) -- but that file is a
+# live-only runtime artifact live-config writes at boot, never part of
+# the actual installed filesystem Calamares copies. Any account
+# Calamares creates (sudoersGroup: sudo, per calamares-settings-debian's
+# users.conf) otherwise falls back to Debian's normal default: prompt
+# for the invoking user's own password. That breaks kiosk operation --
+# vpinos-menu needs to launch Hyprland/vpinball/vpinfe/calamares with zero
+# interactive prompts. Scoped to vpinos-launch specifically (not blanket
+# NOPASSWD: ALL) so a real password is still required for anything else
+# run via sudo on an installed system.
+%sudo ALL=(ALL) NOPASSWD: /usr/bin/vpinos-launch
+
+# vpinos-menu's own Shutdown option (systemctl poweroff, not the
+# whole systemctl binary) -- a kiosk cabinet's only "log out" is
+# physically powering it off; no polkit/logind config is assumed
+# present or configured to already allow this for the local session,
+# so this is scoped explicitly, same reasoning and same narrow-scope
+# style as vpinos-launch above.
+%sudo ALL=(ALL) NOPASSWD: /usr/bin/systemctl poweroff
+
+# vpinos-menu's Network Settings option (nmtui, editing/activating
+# NetworkManager connections) -- confirmed directly against
+# NetworkManager's own shipped polkit policy
+# (org.freedesktop.NetworkManager.settings.modify.system): its
+# <allow_active> default is auth_admin_keep, not yes, so even the
+# locally logged-in console user isn't auto-authorized, and there's no
+# polkit agent running in this raw console session to handle that
+# prompt. Running nmtui as root via sudo sidesteps this entirely --
+# polkit trivially authorizes a root-owned caller -- same reasoning and
+# same narrow-scope style as the two rules above.
+%sudo ALL=(ALL) NOPASSWD: /usr/bin/nmtui
+
+# vpinos-launch calls vpinos-gpu-driver.sh (every invocation, before
+# starting Hyprland) to switch which GPU kernel module is bound, per
+# the "GPU Driver" menu option. modprobe/rmmod need CAP_SYS_MODULE
+# (root) -- scoped to this one dedicated script, not a blanket modprobe
+# rule, so vpinos can't load/unload arbitrary kernel modules. Same
+# narrow-scope reasoning as the three rules above.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-gpu-driver.sh
+
+# vpinos-menu's Testing submenu's "SSH Password Authentication" option
+# (live CD only) -- writing an sshd_config.d drop-in and restarting
+# ssh.service both need root. Scoped to this one dedicated script, same
+# narrow-scope reasoning as every other rule above.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-ssh-password-auth.sh
+
+# vpinos-menu's VR > Setup > "Install VR components" option -- apt
+# installs (WiVRn, adb, encoder libraries) and the system-wide OpenXR
+# runtime pointer both need root. Scoped to this one dedicated script,
+# same narrow-scope reasoning as every other rule above.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-vr-setup.sh
+
+# vpinos-menu's Main > "Update VPinOS" option (installed systems only)
+# -- apt-get update/upgrade need root. Scoped to this one dedicated
+# script, which takes no arguments and only runs the same full upgrade
+# as `sudo apt update && sudo apt upgrade`, same narrow-scope reasoning
+# as every other rule above.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-update.sh

@@ -1,0 +1,149 @@
+/* Dark, card-based palette -- carried over directly from the Tk version's
+   colors (this only ever runs on the cabinet's own display, so there's no
+   need for a light-mode variant). */
+:root {
+  --bg: #0d1117;
+  --card-bg: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #2f81f7;
+  --accent-hover: #4c94ff;
+  --success: #238636;
+  --success-hover: #2ea043;
+  --neutral: #30363d;
+  --neutral-hover: #3d444d;
+  --err: #f85149;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#app { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+.header h1 { text-align: center; font-size: 28px; margin: 12px 0 4px; }
+.header p { text-align: center; margin: 0 0 24px; }
+
+/* ---- monitor table ---- */
+.table { margin-bottom: 24px; }
+.row.head {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.4fr 1.6fr;
+  padding: 0 14px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.row.card-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.4fr 1.6fr;
+  align-items: center;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 14px;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.col.monitor .mon-name { font-weight: 700; font-size: 15px; }
+.col.role, .col.rate { display: flex; flex-wrap: wrap; gap: 6px 16px; align-content: flex-start; }
+
+button.show {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+button.show:hover { background: var(--accent-hover); }
+button.show:disabled { background: var(--border); color: var(--muted); cursor: default; }
+
+label.radio { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+
+/* ---- VPinball Mode ---- */
+.mode-card { text-align: center; margin: 24px 0; }
+.section-title { font-size: 16px; font-weight: 700; margin: 0 0 8px; }
+.mode-radios { display: flex; justify-content: center; gap: 28px; margin-top: 10px; }
+label.radio.mode { font-size: 14px; }
+
+/* ---- Rendering Options / Cabinet extras ---- */
+.card.section { background: transparent; padding: 0; margin: 0 auto 24px; max-width: 860px; }
+.card.section > .section-title { padding: 0 4px; margin-bottom: 10px; }
+.card.section .sub {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  margin: 18px 4px 6px;
+}
+.card.section .sub:first-of-type { margin-top: 0; }
+
+.option, .card-row.field {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 16px;
+  margin: 6px 0;
+}
+label.option { cursor: pointer; }
+.option input[type="radio"], .option input[type="checkbox"] { margin-top: 3px; flex: none; }
+.option-name { font-weight: 700; font-size: 14px; }
+.option p { margin: 4px 0 0; font-size: 13px; }
+.text-col { flex: 1; min-width: 0; }
+
+.card-row.field { align-items: center; }
+.card-row.field .text-col p { margin: 0; font-size: 13px; }
+
+.num-input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  width: 100px;
+  font-size: 14px;
+  flex: none;
+}
+.num-input:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* ---- status / buttons ---- */
+.status { min-height: 22px; text-align: center; margin: 16px 0; font-size: 14px; }
+.status.ok { color: var(--success-hover); }
+.status.err { color: var(--err); }
+
+.button-row { display: flex; justify-content: center; gap: 14px; margin-bottom: 40px; }
+button.save, button.quit {
+  border: none;
+  border-radius: 8px;
+  padding: 12px 30px;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+button.save { background: var(--success); color: #fff; }
+button.save:hover { background: var(--success-hover); }
+button.quit { background: var(--neutral); color: var(--text); }
+button.quit:hover { background: var(--neutral-hover); }
+
+.stopped { text-align: center; padding: 100px 20px; color: var(--muted); font-size: 16px; }
+
+@media (max-width: 760px) {
+  .row.head { display: none; }
+  .row.card-row { grid-template-columns: 1fr; }
+}

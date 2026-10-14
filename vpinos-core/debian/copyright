@@ -1,0 +1,8 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: vpinos-core
+Source: https://github.com/vpinos/vpinos-packages
+
+Files: *
+Copyright: 2026 Superhac <superhac007@gmail.com>
+License: TBD
+ The license for VPinOS has not been chosen yet.

@@ -1,0 +1,44 @@
+name: Release package
+
+# One package per tag:
+#   core-vX.Y.Z  -> vpinos-core X.Y.Z (must match vpinos-core/debian/changelog)
+# The release gets the .deb + .deb.sha256, which is what deb-repo's
+# "Update apt repository" workflow publishes from (run it with
+# source_repo=vpinos/vpinos-packages and this tag).
+on:
+  push:
+    tags:
+      - "core-v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build builder image
+        run: docker build -t vpinos-packages-builder .
+
+      - name: Check tag matches changelog
+        run: |
+          tag_ver="${GITHUB_REF_NAME#core-v}"
+          deb_ver="$(docker run --rm -v "$PWD:/work" -w /work vpinos-packages-builder \
+            dpkg-parsechangelog -l vpinos-core/debian/changelog -S Version)"
+          if [ "$tag_ver" != "$deb_ver" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match vpinos-core/debian/changelog ($deb_ver)" >&2
+            exit 1
+          fi
+
+      - name: Build vpinos-core
+        run: ./build.sh vpinos-core
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.deb dist/*.deb.sha256 \
+            --title "vpinos-core ${GITHUB_REF_NAME#core-v}" \
+            --notes "vpinos-core ${GITHUB_REF_NAME#core-v}. Publish with deb-repo's \"Update apt repository\" workflow (source_repo=vpinos/vpinos-packages, tag $GITHUB_REF_NAME)."

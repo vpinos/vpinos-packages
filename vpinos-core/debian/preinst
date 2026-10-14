@@ -1,0 +1,27 @@
+#!/bin/sh
+# Refuses to install on anything but a system built from a VPinOS image
+# new enough for this package. The ISO build writes
+# /usr/share/vpinos/base-version (1.1 for the first image built around
+# vpinos-core). Cabinets installed from 1.0.x ISOs have no such file:
+# they share the apt repo, but they were never built for this package
+# (see notes/vpinos-core-update-plan.md, "No upgrade path"), so they must
+# reinstall from a new ISO instead of picking it up here.
+set -e
+
+MIN_BASE=1.1
+
+case "$1" in
+    install|upgrade)
+        base=$(cat /usr/share/vpinos/base-version 2>/dev/null || true)
+        if [ -z "$base" ] || dpkg --compare-versions "$base" lt "$MIN_BASE"; then
+            echo "vpinos-core: this system was not installed from a VPinOS $MIN_BASE or newer image" >&2
+            echo "vpinos-core: (found base-version '${base:-none}')." >&2
+            echo "vpinos-core: reinstall from the latest VPinOS ISO: https://github.com/vpinos/vpinos/releases" >&2
+            exit 1
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -1,0 +1,29 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+# src/ is laid out exactly as installed.
+override_dh_auto_install:
+	mkdir -p debian/vpinos-core
+	cp -a src/. debian/vpinos-core/
+
+# vpinos-hosts.service writes /etc/hosts at every boot. Not started on
+# install/upgrade: it's a boot-time job. vpinos-fetch-tables.service is
+# shipped but deliberately NOT enabled -- the sample tables are bundled
+# into the ISO (0105-bundle-sample-tables.hook.chroot); enabling it is a
+# one-line change if they ever go back to download-on-boot.
+override_dh_installsystemd:
+	dh_installsystemd --no-start vpinos-hosts.service
+	dh_installsystemd --no-enable --no-start vpinos-fetch-tables.service
+
+# Modes don't depend on the build host's checkout. sudo silently
+# ignores a sudoers.d file that isn't exactly 0440; the root helpers are
+# run via sudo, so they must not be writable by anyone but root (dpkg
+# installs everything root:root).
+override_dh_fixperms:
+	dh_fixperms
+	chmod 0755 debian/vpinos-core/usr/bin/* \
+		debian/vpinos-core/usr/libexec/vpinos/* \
+		debian/vpinos-core/etc/update-motd.d/*
+	chmod 0440 debian/vpinos-core/etc/sudoers.d/vpinos-core

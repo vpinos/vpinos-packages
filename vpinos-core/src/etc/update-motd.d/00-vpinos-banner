@@ -1,0 +1,15 @@
+#!/bin/sh
+# Shows the same logo/version/IP banner as the console menu's header
+# (vpinos-menu's print_logo()) on SSH login -- both call the same
+# shared vpinos-banner.sh, so there's one source of truth for the art.
+#
+# Numbered 00- to run first, before base-files' own default
+# /etc/update-motd.d/10-uname -- standard Debian pam_motd mechanism
+# (session optional pam_motd.so in /etc/pam.d/sshd), triggered on every
+# interactive SSH login automatically, no extra package/config needed.
+# Deliberately NOT wired into /etc/profile.d/vpinos-menu.sh's own
+# console auto-launch -- that script explicitly skips SSH sessions
+# (remote admin access auto-launching a blocking menu would be actively
+# unhelpful), and pam_motd is a separate mechanism that runs
+# independently of that, so this doesn't conflict with it.
+/usr/libexec/vpinos/vpinos-banner.sh
