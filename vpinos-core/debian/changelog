@@ -1,3 +1,12 @@
+vpinos-core (1.1.2) trixie; urgency=medium
+
+  * Depends on vpinos-platform and vpinos-kernel: the kernel and the
+    NVIDIA driver (prebuilt modules) now come through apt too.
+  * Update VPinOS runs two apt rounds (pins first, then kernel/driver) and
+    allows the downgrades a deliberate driver rollback needs.
+
+ -- Superhac <superhac007@gmail.com>  Wed, 14 Oct 2026 19:10:42 -0500
+
 vpinos-core (1.1.1) trixie; urgency=medium
 
   * Main menu: new r) Reboot option (with confirmation), plus a
