@@ -6,7 +6,10 @@ through apt instead of a reinstall.
 
 | Package | What it is |
 |---|---|
-| `vpinos-core` | The console menu (`vpinos-menu`), the Hyprland kiosk launcher (`vpinos-launch`), the cabinet configuration tool (`vpinos-config`), their root helpers (`/usr/libexec/vpinos/`), sudoers rules, systemd units and login hooks, plus the default cabinet configuration |
+| `vpinos-core` | The console menu (`vpinos-menu`), the Hyprland kiosk launcher (`vpinos-launch`), the cabinet configuration tool (`vpinos-config`), their root helpers (`/usr/libexec/vpinos/`), sudoers rules, systemd units and login hooks, plus the default cabinet configuration. Depends on `vpinos-platform` and `vpinos-kernel` |
+| `vpinos-platform` | The apt pins that hold the kernel, Mesa, firmware and NVIDIA driver in place (frozen backports snapshot, exact NVIDIA version), plus on amd64 the NVIDIA modprobe settings. No version-locked dependencies (see [Upgrading the kernel or NVIDIA driver](#upgrading-the-kernel-or-nvidia-driver)) |
+| `vpinos-kernel` | The exact kernel, plus on amd64 the NVIDIA modules built for it |
+| `vpinos-nvidia-modules-<kernel>` | amd64 only: the open NVIDIA kernel modules prebuilt for exactly that kernel, holding the NVIDIA userspace at exactly the same version. Cabinets never need DKMS or a compiler |
 
 Packages are built here, released as GitHub releases, and published by
 [`vpinos/deb-repo`](https://github.com/vpinos/deb-repo), the single signed
@@ -15,20 +18,26 @@ apt repository every VPinOS image uses:
 ```
 deb-package-builder  --+  (vpinball, vpinfe, vpxconfig, WiVRn, xrizer)
                        +-->  deb-repo (signs + publishes the apt repo)  -->  cabinets
-vpinos-packages  ------+  (vpinos-core)
+vpinos-packages  ------+  (vpinos-core, vpinos-platform, vpinos-kernel, vpinos-nvidia-modules)
 ```
 
 ## Layout
 
 ```
 vpinos-core/
-├── debian/     control, changelog, rules, preinst/postinst/postrm
-└── src/        files laid out exactly as installed
-Dockerfile      trixie build image (debhelper, lintian, visudo)
-build.sh        builds one package into dist/
+├── debian/        control, changelog, rules, preinst/postinst/postrm
+└── src/           files laid out exactly as installed
+versions.env       kernel, snapshot and NVIDIA versions: the one place they're set
+vpinos-platform/
+├── apt/           the apt pins cabinets get (must agree with versions.env)
+├── modprobe/      the NVIDIA modprobe settings (amd64)
+└── postinst       writes the pins + modprobe files on every install/upgrade
+Dockerfile         trixie build image (debhelper, lintian, visudo)
+build.sh           builds vpinos-core into dist/
+build-platform.sh  builds vpinos-platform, vpinos-kernel and the NVIDIA modules into dist/
 .github/workflows/
-├── build.yml   every push/PR: build, upload the .debs as artifacts
-└── release.yml on a core-vX.Y.Z tag: build and attach .deb + .sha256 to a release
+├── build.yml      every push/PR: build everything, upload the .debs as artifacts
+└── release.yml    on a core-vX.Y.Z or platform-vX.Y.Z tag: build and attach the .debs to a release
 ```
 
 ## Building
@@ -36,9 +45,11 @@ build.sh        builds one package into dist/
 ```sh
 docker build -t vpinos-packages-builder .
 ./build.sh vpinos-core
+./build-platform.sh          # kernel/NVIDIA packages; about 3 minutes, needs network
 ```
 
-This gives you `dist/vpinos-core_<version>_all.deb` and a `.deb.sha256`.
+This gives you `dist/vpinos-core_<version>_all.deb` and a `.deb.sha256`, and
+the platform, kernel and NVIDIA module debs.
 The build also checks the sudoers file with `visudo -cf` and runs lintian.
 
 To try a change on a test cabinet, copy the .deb over and install it with
@@ -202,7 +213,7 @@ Packages from `deb-package-builder` (vpinball, vpinfe, ...) are kept.
 - **A bad version reached cabinets**: fix it and release a higher version.
   There's no way to pull a published version back from cabinets.
 
-### Release checklist
+### Release checklist (vpinos-core)
 
 1. Change under `vpinos-core/src/` (and `debian/control` if it needs a new dependency).
 2. `./build.sh vpinos-core` passes.
@@ -211,3 +222,42 @@ Packages from `deb-package-builder` (vpinball, vpinfe, ...) are kept.
 5. `git tag core-v<version>` and push the tag; **Release package** goes green.
 6. deb-repo **Update apt repository** with `source_repo=vpinos/vpinos-packages` and the tag.
 7. Check the `Packages` index, then update a test cabinet.
+
+## Upgrading the kernel or NVIDIA driver
+
+The kernel and the NVIDIA driver reach cabinets through apt too. Everything
+is set in `versions.env`. The full procedure, with how to find available
+versions and how to test, is in the VPinOS repo's
+`notes/skills/upgrade-kernel-nvidia/SKILL.md`. In short:
+
+1. **Edit `versions.env`.** Always bump `PLATFORM_VERSION`, even for a
+   rollback. Change `SNAPSHOT` + `KERNEL_ABI` for a kernel, or
+   `NVIDIA_VERSION` + `NVIDIA_DEB_VERSION` for a driver.
+2. **Edit the matching apt files:** `vpinos-platform/apt/vpinos-backports.list`
+   (snapshot date) and `vpinos-platform/apt/vpinos-nvidia-repo.pref`
+   (`Pin: version <NVIDIA_VERSION>-*`).
+3. **`./build-platform.sh`.** It refuses to build if step 1 and step 2
+   disagree, builds the NVIDIA modules against the exact kernel, and warns
+   if NVIDIA's userspace package list changed (add new names to
+   `NVIDIA_USERSPACE`).
+4. **Test** on a test cabinet (`sudo apt install ./…deb`, reboot, check
+   Setup → GPU Driver both ways) or in a local ISO.
+5. **Mirror into the ISO repo:** copy `vpinos-platform/apt/*` to
+   `~/vpinos/config/archives/` and set the kernel in
+   `config/package-lists/vpinos.list.chroot`. The ISO build refuses to run if
+   these differ from `vpinos-platform`.
+6. **Release:** commit, push, then `git tag platform-v<PLATFORM_VERSION>` and
+   push the tag. One release holds all five debs. Publish it through deb-repo
+   with `source_repo=vpinos/vpinos-packages` and that tag.
+7. **Cabinets:** Menu → Update VPinOS, then reboot. The old kernel stays in
+   GRUB as a fallback.
+
+**Why there are two packages, and why updating takes two apt rounds.** apt
+picks versions using the pins already on the cabinet. A new kernel is in a
+snapshot the cabinet doesn't list yet, and a new driver is blocked by the
+old exact-version pin. So `vpinos-platform` (the pins, with nothing that can
+block it) upgrades first and rewrites them. Then, after a fresh
+`apt update`, `vpinos-kernel` (the kernel, modules and NVIDIA userspace)
+follows under the new pins. Menu → Update VPinOS always runs both rounds.
+Anyone updating by hand runs `sudo apt update && sudo apt upgrade`
+**twice** after a kernel/driver release. Put that in the release notes.

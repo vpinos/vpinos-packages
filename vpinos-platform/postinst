@@ -1,0 +1,58 @@
+#!/bin/sh
+set -e
+
+SHARE=/usr/share/vpinos-platform
+
+case "$1" in
+    configure)
+        # The apt pins that hold the kernel, Mesa, firmware and the NVIDIA
+        # driver where this platform version wants them. Written on every
+        # configure, deliberately NOT conffiles: a platform bump must
+        # always replace them (a conffile would be kept as-is by
+        # --force-confold, which the menu's update uses), and VPinOS
+        # images ship identical copies at the same paths (config/archives).
+        install -m 0644 "$SHARE/apt/vpinos-backports.list" /etc/apt/sources.list.d/vpinos-backports.list
+        install -m 0644 "$SHARE/apt/vpinos-backports.pref" /etc/apt/preferences.d/vpinos-backports.pref
+        install -m 0644 "$SHARE/apt/vpinos-nvidia-repo.pref" /etc/apt/preferences.d/vpinos-nvidia-repo.pref
+
+        # amd64 (NVIDIA) only.
+        if [ -d "$SHARE/modprobe" ]; then
+            changed=
+            # Same files, names and content the ISO's NVIDIA hook always
+            # wrote (real-hardware fixes, see the audit script):
+            #   vpinos-nvidia-no-autoload.conf  `blacklist nvidia` -- the
+            #     driver is opt-in per cabinet (Setup > GPU Driver);
+            #     vpinos-gpu-driver.sh loads it by name when chosen.
+            #   nvidia-wayland.conf  `options nvidia-drm modeset=1` --
+            #     Hyprland needs DRM KMS from the NVIDIA driver.
+            for f in vpinos-nvidia-no-autoload.conf nvidia-wayland.conf; do
+                if ! cmp -s "$SHARE/modprobe/$f" "/etc/modprobe.d/$f"; then
+                    install -m 0644 "$SHARE/modprobe/$f" "/etc/modprobe.d/$f"
+                    changed=1
+                fi
+            done
+            # nvidia-kernel-support/nvidia-driver ship these, but must not
+            # be active here: modules-load.d would probe nvidia-drm on
+            # every boot regardless of the cabinet's choice, and the
+            # nouveau blacklist (baked into the initramfs) breaks early
+            # boot console KMS on multi-monitor setups. A deleted conffile
+            # stays deleted across NVIDIA upgrades, so this normally only
+            # does anything on first install.
+            for f in /etc/modules-load.d/nvidia.conf /etc/modprobe.d/nvidia-blacklists-nouveau.conf; do
+                if [ -e "$f" ]; then
+                    rm -f "$f"
+                    changed=1
+                fi
+            done
+            # Fails to start without an NVIDIA GPU, regardless of the
+            # cabinet's choice; nothing here needs it.
+            systemctl disable nvidia-persistenced.service >/dev/null 2>&1 || true
+            # modprobe.d is copied into the initramfs.
+            if [ -n "$changed" ] && command -v update-initramfs >/dev/null; then
+                update-initramfs -u -k all || true
+            fi
+        fi
+        ;;
+esac
+
+exit 0

@@ -21,6 +21,9 @@ jobs:
       - name: Build vpinos-core
         run: ./build.sh vpinos-core
 
+      - name: Build vpinos-platform + NVIDIA modules
+        run: ./build-platform.sh
+
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:

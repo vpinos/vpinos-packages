@@ -1,14 +1,18 @@
 name: Release package
 
-# One package per tag:
-#   core-vX.Y.Z  -> vpinos-core X.Y.Z (must match vpinos-core/debian/changelog)
-# The release gets the .deb + .deb.sha256, which is what deb-repo's
+# One release per tag:
+#   core-vX.Y.Z      -> vpinos-core X.Y.Z (must match vpinos-core/debian/changelog)
+#   platform-vX.Y.Z  -> vpinos-platform X.Y.Z (amd64 + arm64) and
+#                       vpinos-nvidia-modules-<kernel> (amd64), built from
+#                       versions.env (PLATFORM_VERSION must be X.Y.Z)
+# The release gets the .debs + .deb.sha256 files, which is what deb-repo's
 # "Update apt repository" workflow publishes from (run it with
 # source_repo=vpinos/vpinos-packages and this tag).
 on:
   push:
     tags:
       - "core-v*"
+      - "platform-v*"
 
 jobs:
   release:
@@ -22,23 +26,41 @@ jobs:
       - name: Build builder image
         run: docker build -t vpinos-packages-builder .
 
-      - name: Check tag matches changelog
+      - name: Check tag matches the version
         run: |
-          tag_ver="${GITHUB_REF_NAME#core-v}"
-          deb_ver="$(docker run --rm -v "$PWD:/work" -w /work vpinos-packages-builder \
-            dpkg-parsechangelog -l vpinos-core/debian/changelog -S Version)"
-          if [ "$tag_ver" != "$deb_ver" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match vpinos-core/debian/changelog ($deb_ver)" >&2
+          case "$GITHUB_REF_NAME" in
+            core-v*)
+              tag_ver="${GITHUB_REF_NAME#core-v}"
+              ver="$(docker run --rm -v "$PWD:/work" -w /work vpinos-packages-builder \
+                dpkg-parsechangelog -l vpinos-core/debian/changelog -S Version)"
+              where="vpinos-core/debian/changelog"
+              ;;
+            platform-v*)
+              tag_ver="${GITHUB_REF_NAME#platform-v}"
+              ver="$(. ./versions.env; echo "$PLATFORM_VERSION")"
+              where="versions.env PLATFORM_VERSION"
+              ;;
+          esac
+          if [ "$tag_ver" != "$ver" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match $where ($ver)" >&2
             exit 1
           fi
 
-      - name: Build vpinos-core
-        run: ./build.sh vpinos-core
+      - name: Build
+        run: |
+          case "$GITHUB_REF_NAME" in
+            core-v*)     ./build.sh vpinos-core ;;
+            platform-v*) ./build-platform.sh ;;
+          esac
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          case "$GITHUB_REF_NAME" in
+            core-v*)     title="vpinos-core ${GITHUB_REF_NAME#core-v}" ;;
+            platform-v*) title="vpinos-platform ${GITHUB_REF_NAME#platform-v}" ;;
+          esac
           gh release create "$GITHUB_REF_NAME" dist/*.deb dist/*.deb.sha256 \
-            --title "vpinos-core ${GITHUB_REF_NAME#core-v}" \
-            --notes "vpinos-core ${GITHUB_REF_NAME#core-v}. Publish with deb-repo's \"Update apt repository\" workflow (source_repo=vpinos/vpinos-packages, tag $GITHUB_REF_NAME)."
+            --title "$title" \
+            --notes "$title. Publish with deb-repo's \"Update apt repository\" workflow (source_repo=vpinos/vpinos-packages, tag $GITHUB_REF_NAME)."

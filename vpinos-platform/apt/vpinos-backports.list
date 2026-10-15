@@ -1,0 +1,52 @@
+# trixie-backports, pinned to a frozen snapshot.debian.org timestamp
+# instead of live-build's own `--backports true` (which points at the
+# live, rolling deb.debian.org mirror) -- real, repeated build failures,
+# not a guess: trixie-backports' kernel packaging got caught mid a
+# Secure-Boot signing-pipeline transition starting with linux
+# 7.2.6-1~bpo13+1's source upload (accepted 2026-10-03 08:11:33 UTC,
+# confirmed via tracker.debian.org). The unsigned kernel +
+# linux-base/linux-modules/linux-headers for a new ABI publish before
+# the final signed linux-image for that same ABI does, while the OLD
+# ABI's (7.1.13, the version actually pinned below and used by every
+# build before this one) own base/modules/headers get
+# garbage-collected in the meantime -- so for a real window there was
+# NO kernel ABI version with a complete, installable set at all.
+# Confirmed directly against the live mirror, repeatedly, including
+# across a full fresh `lb clean --purge` + re-bootstrap (ruling out any
+# caching on this project's own side).
+#
+# This snapshot timestamp (2026-10-02, the day *before* that transition
+# even started) was deliberately chosen over a later one specifically
+# to get 7.1.13's own original, fully-matching
+# image/base/modules/headers set, verified complete with a real
+# `Candidate:` line for all four (not just "not explicitly marked
+# unavailable" -- an earlier verification pass had a real bug doing
+# exactly that substitution and produced false "complete" readings for
+# a NEWER version, 7.2.6, whose actual signed linux-image turned out to
+# never have been published at all. Corrected directly, not left in
+# place). The goal here was never "get a newer kernel than before" --
+# 7.1.13 already satisfies the RX 9060 XT's 6.14+ requirement fine --
+# just "stop being at the mercy of a live mirror mid-transition."
+#
+# [check-valid-until=no]: snapshot.debian.org's own Release files carry
+# a Valid-Until timestamp that's already in the past by the time anyone
+# fetches an old snapshot (it's a frozen historical copy, not a rolling
+# one) -- apt refuses expired Release files by default ("Release file
+# ... is expired"); this is the standard, documented way to use
+# snapshot.debian.org with apt at all, not a security downgrade specific
+# to this project (the content is still signed by the same Debian
+# archive keys trixie itself already trusts -- no separate keyring
+# needed, same reasoning as vpinos-sid.list's own comment).
+#
+# Known trade-off, same category as the nvidia driver's own sid pin and
+# the kernel ABI version pin in vpinos.list.chroot: this is frozen, not
+# self-tracking -- no new backports packages (security fixes included)
+# arrive until this timestamp is manually bumped to a newer one. Accepted
+# deliberately here specifically because the live alternative has proven
+# to be actively unreliable, not just eventually-consistent-ish.
+#
+# Plain .list (not .list.chroot): matches vpinos-backports.pref's own
+# reasoning -- kept in the final image so an installed system's
+# `apt install -t trixie-backports <pkg>` keeps resolving consistently
+# too, not just this build.
+deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261002T203108Z/ trixie-backports main contrib non-free non-free-firmware

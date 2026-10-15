@@ -1,0 +1,63 @@
+# Prefer NVIDIA's own apt repository for the proprietary driver over
+# Debian's own packaging of it (trixie/trixie-backports/sid all only
+# ever have 550.163.01 -- confirmed directly via `apt-cache madison`
+# against the live archives -- Debian simply hasn't packaged a newer
+# NVIDIA driver branch at all yet). Switched after a real, reproducible
+# multi-monitor bug (3 real displays under "nvidia" mode: only 2 ever
+# get configured, one of the two visibly misconfigured) that 550.163.01
+# doesn't fix and that newer NVIDIA driver branches plausibly do --
+# NVIDIA's own repo currently serves 615.71.09, a huge jump ahead.
+#
+# `nvidia-driver` package NAME is unchanged -- confirmed directly via
+# `apt-cache madison` against the real repo that NVIDIA's own packaging
+# mirrors Debian's own naming convention -- so apt would normally just
+# pick the higher version automatically even without this pin (same
+# priority, higher version wins), but pinning explicitly anyway, same
+# deliberate-not-implicit pattern as every other special source in this
+# directory, rather than relying on that default behavior holding
+# forever.
+#
+# nvidia-kernel-OPEN-dkms, not nvidia-kernel-dkms -- confirmed directly
+# via `apt-cache show nvidia-driver` against this real repo that as of
+# this branch (615.71.09), `nvidia-driver` hard-depends on the open
+# kernel module only; the genuine closed nvidia-kernel-dkms (with a real
+# `Conflicts: nvidia-kernel-open-dkms`) only still exists one branch back
+# (610.57.04-1). Decided to accept the open module and take the actual
+# latest driver rather than pin back for the closed one -- see
+# 0120-install-nvidia-driver.hook.chroot's own comment for the full
+# reasoning and hardware trade-off (this project's own GTX 1650 test
+# hardware is Turing, fully covered by the open module either way).
+#
+# CONFIRMED via a real `lb build`: nvidia-kernel-open-dkms compiles
+# cleanly against this project's own pinned kernel
+# (7.1.13+deb13-amd64, from vpinos-backports.list).
+# Exact-version hold, ahead of the origin pin below because apt uses
+# the FIRST name-matching record for each version (and any name-matching
+# record beats a `Package: *` one, so this can't be a catch-all).
+# 0120-install-nvidia-driver.hook.chroot compiles the kernel modules
+# once at build time and purges DKMS -- the .ko files in
+# /lib/modules/<kver>/updates/dkms/ are owned by no package and can
+# never be rebuilt on a cabinet. NVIDIA's repo stays enabled on
+# installed systems, so without this hold a plain `apt upgrade` after
+# NVIDIA publishes a newer driver moves the userspace libraries (and
+# firmware-nvidia-gsp) ahead of the modules: kernel/userspace "API
+# mismatch", proprietary driver dead. Verified by simulating a newer
+# release against a real build's apt lists: candidate 615.80.01 without
+# this record, 615.71.09 with it.
+#
+# The regex also covers packages installed later on demand (libcuda1,
+# libnvidia-encode1 from vpinos-vr-setup.sh); the version match keeps it
+# off libnvidia-egl-* and friends, which have their own version numbers.
+# 1001 beats the 900 below, and -* allows NVIDIA repackaging revisions
+# of the same driver, which still match the modules.
+#
+# Bumping the driver: change this version and rebuild the ISO. The 0120
+# hook reads it back from here and fails the build if NVIDIA's repo no
+# longer serves it, so this can't silently stop matching anything.
+Package: /nvidia|^libcuda|^libnv/
+Pin: version 615.71.09-*
+Pin-Priority: 1001
+
+Package: nvidia-driver nvidia-kernel-open-dkms nvidia-kernel-common nvidia-kernel-support nvidia-smi libnvidia-* nvidia-settings nvidia-modprobe nvidia-persistenced nvidia-xconfig
+Pin: origin developer.download.nvidia.com
+Pin-Priority: 900

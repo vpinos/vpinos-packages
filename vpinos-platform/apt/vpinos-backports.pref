@@ -1,0 +1,56 @@
+# Prefer trixie-backports for the packages needed to run current GPUs
+# (AMD RDNA4 e.g. RX 9060 XT needs a 6.14+ kernel, a recent Mesa for RADV,
+# and recent AMD GPU firmware -- none of which trixie ships). Backports are
+# NotAutomatic (priority 100) by default, so without this file nothing
+# would ever be installed from them. `src:` pins every binary package
+# built from that source package, so related packages stay in step.
+#
+# `Pin: origin snapshot.debian.org`, not `Pin: release n=trixie-backports`
+# -- real, reproduced build failure, not a guess: config/archives/
+# vpinos-backports.list's pinned snapshot source and the live
+# deb.debian.org mirror both report the SAME release/suite name
+# ("trixie-backports") in their Release file, so a release-name-only pin
+# elevates both equally. That's harmless for packages only ever
+# requested by exact version (nothing else asks for a bare "linux"), but
+# live-build's own chroot_linux-image/binary_linux-image steps always
+# additionally request the generic, UNVERSIONED linux-image-<arch>
+# metapackage regardless of this project's own explicit
+# linux-image-7.1.13+deb13-amd64 pin (vpinos.list.chroot). Once the live
+# mirror's kernel moved ahead of the frozen snapshot's, that unversioned
+# request tied on priority with the explicit pin and apt picked the
+# newer/live one, pulling in a `linux-base` version plain trixie doesn't
+# have (`E: Unable to correct problems, you have held broken packages`).
+# `origin snapshot.debian.org` (apt's pin-by-host form, distinct from
+# `release o=...` which matches the Release file's Origin: field --
+# "Debian" for both mirrors, so no help) scopes the elevation to the
+# frozen snapshot only; the live mirror's backports packages stay at
+# their harmless default NotAutomatic priority (100) for everything,
+# matching what already happens for every package not listed here.
+# Verified directly with both mirrors configured together: the
+# `linux-image-amd64` candidate is correctly `7.1.13-1~bpo13+1` again.
+# See notes/vpinos.md step 2 for the full story -- including why
+# `lb config --linux-packages none` is NOT the fix (it also disables
+# copying the kernel into the ISO at all).
+#
+# Plain .pref (not .pref.chroot): live-build keeps it in the final image,
+# so installed systems keep following backports for these packages on
+# `apt upgrade`. Everything not listed here stays on trixie.
+Package: src:linux src:linux-signed-amd64 src:linux-signed-arm64 src:mesa src:firmware-nonfree
+Pin: origin snapshot.debian.org
+Pin-Priority: 900
+
+# Hyprland isn't packaged in plain trixie at all -- only trixie-backports
+# has it (0.55.2, confirmed). Needs a newer libxkbcommon0 than trixie
+# ships too (>= 1.12.3; trixie has 1.7.0), which is also backports-only,
+# so it needs its own pin -- without this, apt's solver won't pull a
+# backports-only dependency in automatically even when the package that
+# needs it is itself pinned (confirmed directly: `apt-get install
+# hyprland/trixie-backports` alone left libxkbcommon0 held at 1.7.0 and
+# failed to resolve; only resolved once libxkbcommon0 was pinned too).
+#
+# `origin snapshot.debian.org`, same reasoning as the kernel/Mesa/
+# firmware stanza above -- scopes this elevation to the pinned snapshot
+# only, not the live mirror too.
+Package: src:hyprland src:libxkbcommon
+Pin: origin snapshot.debian.org
+Pin-Priority: 900
