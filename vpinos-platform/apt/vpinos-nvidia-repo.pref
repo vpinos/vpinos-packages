@@ -31,6 +31,24 @@
 # CONFIRMED via a real `lb build`: nvidia-kernel-open-dkms compiles
 # cleanly against this project's own pinned kernel
 # (7.1.13+deb13-amd64, from vpinos-backports.list).
+# Never install NVIDIA's DKMS side: the nvidia-driver metapackage and
+# the module source packages. VPinOS ships the modules prebuilt
+# (vpinos-nvidia-modules-<kernel>, from vpinos-kernel), so a cabinet must
+# never get DKMS or a compiler -- and a DKMS build would overwrite the
+# module files that package owns. They'd otherwise come in as *Recommends*
+# of NVIDIA's own userspace (xserver-xorg-video-nvidia recommends
+# nvidia-driver + nvidia-kernel-open-dkms, nvidia-vdpau-driver recommends
+# nvidia-kernel-open-dkms); apt installs recommends by default, and the
+# old ISO hook used to purge them afterwards. -1 makes them uninstallable,
+# so apt just skips those recommends. FIRST in this file on purpose: apt
+# uses the first name-matching record, and the version hold below also
+# matches these names. Verified: installing vpinos-core with recommends
+# went from 543 packages (incl. gcc-14, build-essential, dkms,
+# nvidia-kernel-open-dkms, nvidia-driver) to 484 with none of them.
+Package: nvidia-driver nvidia-kernel-open-dkms nvidia-kernel-dkms
+Pin: version *
+Pin-Priority: -1
+
 # Exact-version hold, ahead of the origin pin below because apt uses
 # the FIRST name-matching record for each version (and any name-matching
 # record beats a `Package: *` one, so this can't be a catch-all).

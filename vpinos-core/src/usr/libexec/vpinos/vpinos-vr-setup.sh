@@ -5,7 +5,7 @@
 # with a headset, so they're pulled at runtime instead of growing the
 # image for everyone (needs internet; on the live USB it's lost on
 # reboot, same as any other apt install into the overlay). See
-# notes/vr_plan.md for where each piece comes from and why.
+# notes/vr-support.md for where each piece comes from and why.
 #
 # root-only: apt and /etc/xdg both need root -- see /etc/sudoers.d/vpinos,
 # scoped to this one script specifically, same narrow-scope reasoning

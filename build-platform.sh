@@ -57,6 +57,12 @@ APT=vpinos-platform/apt
 sed -i "s/^Components:.*/Components: main contrib non-free non-free-firmware/" /etc/apt/sources.list.d/debian.sources
 cp $APT/vpinos-backports.list /etc/apt/sources.list.d/
 cp $APT/vpinos-backports.pref $APT/vpinos-nvidia-repo.pref /etc/apt/preferences.d/
+# Build container only: vpinos-nvidia-repo.pref makes the DKMS module
+# source uninstallable (cabinets must never get it), but this is exactly
+# where it is supposed to be installed. Read first (alphabetical), so its
+# record wins.
+printf "Package: nvidia-kernel-open-dkms\nPin: version %s\nPin-Priority: 1001\n" "$NVIDIA_DEB_VERSION" \
+    > /etc/apt/preferences.d/00-vpinos-build.pref
 apt-get update -qq
 apt-get install -y -qq curl ca-certificates >/dev/null
 curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb
