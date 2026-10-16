@@ -24,7 +24,7 @@
 # ScreenWidth/ScreenHeight/ScreenInclination), all written to
 # VPinballX.ini -- hidden entirely in Desktop mode, since VPinballX.ini's
 # own comments say they only matter in Cabinet mode. Save also always
-# sets Priority.ScoreView/PUP/B2SLegacyDMD to fixed values, regardless
+# sets Priority.ScoreView/PUP/B2SLegacyDMD/B2S to fixed values, regardless
 # of mode or role assignment.
 #
 # The UI is a small local web server (stdlib http.server only, no
@@ -623,10 +623,11 @@ def save_vpinball_settings(
     # vpinball's own auto-generated defaults (confirmed directly: they
     # never existed in the file, so set_ini_value's blind
     # end-of-file-append silently misfiled them under the wrong
-    # section) -- all three go under [ScoreView] specifically.
+    # section) -- all four go under [ScoreView] specifically.
     content = set_ini_value_in_section(content, "ScoreView", "Priority.ScoreView", 1)
     content = set_ini_value_in_section(content, "ScoreView", "Priority.PUP", 3)
     content = set_ini_value_in_section(content, "ScoreView", "Priority.B2SLegacyDMD", 2)
+    content = set_ini_value_in_section(content, "ScoreView", "Priority.B2S", 2)
     # Rendering options -- written regardless of Desktop/Cabinet mode,
     # unlike the Cabinet-only extras below: SyncMode/MaxFramerate/
     # MaxPrerenderedFrames affect Desktop play exactly the same way, see
