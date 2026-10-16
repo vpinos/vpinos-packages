@@ -246,7 +246,7 @@ versions and how to test, is in the VPinOS repo's
 4. **Test** on a test machine (`sudo apt install ./…deb`, reboot, check
    Setup → GPU Driver both ways) or in a local ISO.
 5. **Mirror into the ISO repo:** copy `vpinos-platform/apt/*` to
-   `~/vpinos/config/archives/` and set the kernel in
+   `~/repos/vpinos/vpinos/config/archives/` and set the kernel in
    `config/package-lists/vpinos.list.chroot`. The ISO build refuses to run if
    these differ from `vpinos-platform`.
 6. **Release:** commit, push, then `git tag platform-v<PLATFORM_VERSION>` and

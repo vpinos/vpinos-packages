@@ -27,6 +27,12 @@
 # this project itself always launches windowed: installer, vpxconfig,
 # vpinos-config).
 #   e.g. vpinos-launch windowed /opt/wivr/WiVR
+#
+# The name "x11" is reserved too: same as "windowed", but the client
+# gets Xwayland's DISPLAY (plus QT_QPA_PLATFORM=xcb) instead of
+# WAYLAND_DISPLAY -- the installer's exact setup, for an app that only
+# works properly under X11.
+#   e.g. vpinos-launch x11 /usr/bin/some-x11-app
 
 set -e
 
@@ -105,7 +111,7 @@ launch_client() {
     trap 'kill "$compositor_pid" 2>/dev/null || true' EXIT
     trap 'exit 1' HUP TERM
 
-    if [ "$client_name" = "installer" ]; then
+    if [ "$client_name" = "installer" ] || [ "$client_name" = "x11" ]; then
         # calamares's Wayland support is unreliable -- confirmed
         # directly under weston, not a guess: even with QT_QPA_PLATFORM=
         # wayland forced and qt6-wayland installed, its main window
@@ -212,7 +218,7 @@ launch_client() {
         # directly, not via vpinfe) and sysinfo are the only two with
         # no known child-process-spawning behavior, so they're the
         # only ones that still get prompt line-buffered logging below.
-        installer | vpinfe | vpinfe-gamepadtest | vpxconfig | vpinos-config | chrome | windowed | wivrn-dashboard)
+        installer | x11 | vpinfe | vpinfe-gamepadtest | vpxconfig | vpinos-config | chrome | windowed | wivrn-dashboard)
             "$@" >>"$log_file" 2>&1
             ;;
         *)
@@ -431,7 +437,7 @@ chmod 1777 /tmp/.X11-unix 2>/dev/null || true
 # /etc/vpinos/hyprland-installer.conf.
 hypr_config=/etc/vpinos/hyprland.conf
 case "$client_name" in
-    installer | vpxconfig | vpinos-config | windowed) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
+    installer | x11 | vpxconfig | vpinos-config | windowed) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
 esac
 
 # --i-am-really-stupid: Hyprland refuses to run as root without this
