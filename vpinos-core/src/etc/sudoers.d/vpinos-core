@@ -62,3 +62,9 @@
 # as `sudo apt update && sudo apt upgrade`, same narrow-scope reasoning
 # as every other rule above.
 %sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-update.sh
+
+# vpinos-menu's Tools > VPX Editor option, when VPX Editor isn't
+# installed yet -- apt-get install needs root. Scoped to this one
+# dedicated script, which only ever installs the vpx-editor package,
+# same narrow-scope reasoning as every other rule above.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-vpx-editor-setup.sh

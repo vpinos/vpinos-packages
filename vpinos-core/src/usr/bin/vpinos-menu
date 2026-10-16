@@ -480,15 +480,93 @@ testing_submenu() {
 # else here is vpinos-vr.sh. Start VR server also turns VR on in VPX
 # ([PlayerVR] AskToTurnOn = 0 in VPinballX.ini) and Stop puts the
 # previous value back -- see vpinos-vr.sh. See notes/vr-support.md.
-# Main > System Info: 5 on the live USB, 6 on installed systems.
+# Main > Tools > System Info (Debug).
 # Plain "sysinfo" client_name, not in vpinos-launch's windowed-config
 # case arm: a Tk GUI that manages its own fullscreen presentation, so it
 # runs fine under the plain kiosk Hyprland config -- no windowed-config
 # special case needed (see vpinos-launch's hypr_config selection).
 launch_sysinfo() {
-    echo "$(date -Is): menu: selected top/sysinfo" >>/var/log/vpinos-menu.log
+    echo "$(date -Is): menu: selected tools/sysinfo" >>/var/log/vpinos-menu.log
     /usr/bin/vpinos-launch sysinfo /usr/libexec/vpinos/vpinos_sysinfo.py
     echo "$(date -Is): menu: vpinos-launch exited $?" >>/var/log/vpinos-menu.log
+}
+
+vpx_editor_installed() {
+    [ "$(/usr/libexec/vpinos/vpinos-vpx-editor-setup.sh status 2>/dev/null)" = installed ]
+}
+
+# Main > Tools > VPX Editor. Not in the image (big, amd64-only -- see
+# vpinos-vpx-editor-setup.sh), so the first use offers to install it.
+# Launched as vpinos-launch's "x11" client: an Electron app that gets
+# Xwayland's DISPLAY and a normal floating window (the windowed
+# Hyprland config), like the installer, so it can be closed.
+launch_vpx_editor() {
+    echo "$(date -Is): menu: selected tools/vpx-editor" >>/var/log/vpinos-menu.log
+    if [ "$(dpkg --print-architecture)" != amd64 ]; then
+        echo "VPX Editor is only available for amd64 (this is $(dpkg --print-architecture))."
+        pause
+        return
+    fi
+    if ! vpx_editor_installed; then
+        echo "VPX Editor isn't installed (~530 MB download, needs internet)."
+        if ! is_installed; then
+            echo "Live USB: it will be lost on reboot."
+        fi
+        printf "Install it now? [y/N]: "
+        read -r confirm
+        case "$confirm" in
+            y|Y) ;;
+            *) return ;;
+        esac
+        # Runs straight in this tty, like VR > Setup -- no Hyprland
+        # needed, and the apt output stays visible.
+        sudo /usr/libexec/vpinos/vpinos-vpx-editor-setup.sh install
+        rc=$?
+        echo "$(date -Is): menu: vpinos-vpx-editor-setup.sh exited $rc" >>/var/log/vpinos-menu.log
+        if [ "$rc" != 0 ]; then
+            pause
+            return
+        fi
+    fi
+    /usr/bin/vpinos-launch x11 /usr/bin/vpx-editor
+    echo "$(date -Is): menu: vpinos-launch exited $?" >>/var/log/vpinos-menu.log
+}
+
+tools_submenu() {
+    while true; do
+        clear
+        print_logo
+        echo "            Tools"
+        echo "=============================="
+        if [ "$(dpkg --print-architecture)" != amd64 ]; then
+            estate=" (amd64 only)"
+        elif vpx_editor_installed; then
+            estate=""
+        else
+            estate=" (not installed)"
+        fi
+        echo "1) System Info (Debug)"
+        echo "2) VPX Editor$estate"
+        echo "q) Back"
+        echo "=============================="
+        printf "Select an option: "
+        read -r tlchoice
+        case "$tlchoice" in
+            1)
+                launch_sysinfo
+                ;;
+            2)
+                launch_vpx_editor
+                ;;
+            q|Q)
+                return
+                ;;
+            *)
+                echo "Invalid option"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 vr_installed() {
@@ -685,12 +763,12 @@ while true; do
         echo "3) VR"
         echo "4) Update VPinOS"
         echo "5) Testing"
-        echo "6) System Info (Debug)"
+        echo "6) Tools"
     else
         echo "2) Testing"
         echo "3) VR"
         echo "4) Install VPinOS"
-        echo "5) System Info (Debug)"
+        echo "5) Tools"
     fi
     echo "q) Quit to shell"
     echo "s) Shutdown"
@@ -737,12 +815,12 @@ while true; do
             if is_installed; then
                 testing_submenu
             else
-                launch_sysinfo
+                tools_submenu
             fi
             ;;
         6)
             if is_installed; then
-                launch_sysinfo
+                tools_submenu
             else
                 echo "Invalid option"
                 sleep 1
