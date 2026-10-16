@@ -1,3 +1,10 @@
+vpinos-core (1.1.4) trixie; urgency=medium
+
+  * vpinos-config add Priority.B2S = 2 to the VPinballX.ini config for
+    the switch from b2slegacy to b2s as the default plugin.
+
+ -- Superhac <superhac007@gmail.com>  Fri, 16 Oct 2026 11:59:31 -0500
+
 vpinos-core (1.1.3) trixie; urgency=medium
 
   * Main menu: System Info (Debug) moves into a new Tools submenu.
