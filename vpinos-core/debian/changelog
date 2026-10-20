@@ -1,3 +1,11 @@
+vpinos-core (1.1.8) trixie; urgency=medium
+
+  * VPinOS Configuration fills the whole screen. Its window was floating
+    at the size Chrome remembered, which only used the middle of a
+    rotated Table screen. It is now maximized once it opens.
+
+ -- Superhac <superhac007@gmail.com>  Tue, 20 Oct 2026 07:39:51 -0500
+
 vpinos-core (1.1.7) trixie; urgency=medium
 
   * VPinOS Configuration opens already rotated when Table Screen Rotation

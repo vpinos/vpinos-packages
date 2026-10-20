@@ -1045,6 +1045,41 @@ def stop(httpd):
     threading.Thread(target=httpd.shutdown, daemon=True).start()
 
 
+# Chrome's window class for --app=http://127.0.0.1:<port> (Chrome
+# derives it from the URL, minus the port -- see hyprland.conf's VPinFE
+# windowrules for the same pattern).
+CHROME_WINDOW_CLASS = "chrome-127.0.0.1__-Default"
+
+
+def maximize_chrome_window(timeout=20.0):
+    # --start-maximized alone doesn't do it: this tool runs under the
+    # windowed Hyprland config, which floats every window, and Hyprland
+    # ignores a floating window's own maximize request -- Chrome then
+    # opens at whatever size it remembered. Confirmed on a real
+    # (rotated, 800x1280) Table screen: `hyprctl clients` showed the
+    # window floating at 780x585, centered, using a fraction of the
+    # screen. So once the window has mapped, ask Hyprland to maximize it
+    # (`fullscreen 1` = maximize, keeps the title bar and gaps). Done
+    # here rather than as a windowrule in hyprland-installer.conf, which
+    # is seed-only and never reaches existing cabinets. Runs on a
+    # background thread, best-effort: on a timeout the window just stays
+    # the size Chrome picked.
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            clients = hyprctl_json("clients")
+        except (RuntimeError, ValueError):
+            clients = []
+        for c in clients:
+            if c.get("class") == CHROME_WINDOW_CLASS and c.get("mapped"):
+                address = c.get("address")
+                hyprctl("dispatch", "focuswindow", f"address:{address}")
+                if not c.get("fullscreen"):
+                    hyprctl("dispatch", "fullscreen", "1")
+                return
+        time.sleep(0.25)
+
+
 def run_with_chrome(httpd, host, port):
     # This script is vpinos-launch's client (see the header comment for why),
     # so it -- not vpinos-menu -- is responsible for putting a window
@@ -1070,6 +1105,7 @@ def run_with_chrome(httpd, host, port):
             "--noerrdialogs",
         ]
     )
+    threading.Thread(target=maximize_chrome_window, daemon=True).start()
 
     try:
         while chrome.poll() is None and server_thread.is_alive():
