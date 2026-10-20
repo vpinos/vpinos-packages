@@ -1123,6 +1123,12 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+    # The reload also drops the Table Screen Rotation vpinos-launch
+    # applied just before starting this tool -- put it back, or this
+    # tool always opens unrotated (a real report: rotated right after
+    # Save, unrotated again on the next launch). After get_monitors(),
+    # so the mode lines Save writes come from the unrotated outputs.
+    apply_table_rotation()
 
     if not monitors:
         print("hyprctl reported zero monitors.", file=sys.stderr)

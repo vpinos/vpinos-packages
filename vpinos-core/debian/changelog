@@ -1,3 +1,11 @@
+vpinos-core (1.1.7) trixie; urgency=medium
+
+  * VPinOS Configuration opens already rotated when Table Screen Rotation
+    is set. The reload it runs at startup was dropping the rotation, so it
+    only came back after the next Save.
+
+ -- Superhac <superhac007@gmail.com>  Tue, 20 Oct 2026 06:56:45 -0500
+
 vpinos-core (1.1.6) trixie; urgency=medium
 
   * Table Screen Rotation no longer rotates VPinball or VPinFE, which
