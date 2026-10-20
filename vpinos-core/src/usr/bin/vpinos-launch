@@ -90,6 +90,38 @@ wait_for_glob() {
     return 1
 }
 
+# Table Screen Rotation (portrait mode, set in vpinos-config): applies
+# the Table monitor's rotated `monitor = ...` line from
+# /etc/vpinos/table-rotation.conf to this Hyprland session, via hyprctl,
+# before the client starts. Every client except VPinball and VPinFE
+# (vpinfe-gamepadtest is VPinFE too) -- those rotate the playfield
+# themselves, so they must see the screen unrotated, which is why this
+# isn't in either Hyprland config file. Runs inside launch_client(),
+# a sibling of the `exec Hyprland` below, so it has to find Hyprland's
+# IPC socket itself (same as vpinos-config's ensure_instance_signature()).
+apply_table_rotation() {
+    case "$client_name" in
+        vpinball | vpinfe | vpinfe-gamepadtest) return 0 ;;
+    esac
+    rotation_conf=/etc/vpinos/table-rotation.conf
+    lines=$(sed -n 's/^[[:space:]]*monitor[[:space:]]*=[[:space:]]*//p' "$rotation_conf" 2>/dev/null | tr -d ' ')
+    [ -n "$lines" ] || return 0
+    hypr_sock=$(wait_for_glob "$runtime_dir/hypr/*/.socket.sock") || {
+        echo "$(date -Is): vpinos-launch: timed out waiting for Hyprland's IPC socket -- Table Screen Rotation not applied" >>"$log_file"
+        return 0
+    }
+    HYPRLAND_INSTANCE_SIGNATURE=$(basename "$(dirname "$hypr_sock")")
+    export HYPRLAND_INSTANCE_SIGNATURE
+    echo "$lines" | while read -r value; do
+        if hyprctl keyword monitor "$value" >/dev/null 2>&1; then
+            echo "$(date -Is): vpinos-launch: Table Screen Rotation applied: monitor=$value" >>"$log_file"
+        else
+            echo "$(date -Is): vpinos-launch: hyprctl keyword monitor $value failed" >>"$log_file"
+        fi
+    done
+    return 0
+}
+
 launch_client() {
     # $@ here comes from the explicit args passed at the call site
     # below (`launch_client "$@" &`) -- a shell function called with no
@@ -149,6 +181,7 @@ launch_client() {
         display_label="WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
     fi
 
+    apply_table_rotation
     echo "$(date -Is): vpinos-launch: launching $client_name -- $display_label -- $*" >>"$log_file"
     # stdbuf -oL -eL: output redirected to a file (not a terminal)
     # normally switches C stdio from line-buffered to fully-buffered,

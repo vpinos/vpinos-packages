@@ -114,7 +114,8 @@ function tableRotationSection() {
   return h("div", { class: "card section" },
     h("div", { class: "section-title" }, "Table Screen Rotation"),
     h("p", { class: "muted", style: "margin:0 4px 10px;" },
-      "Portrait mode -- applies only to the monitor assigned the Table role."),
+      "Portrait mode for the monitor assigned the Table role. Applies to everything except " +
+      "VPinball and VPinFE, which rotate the playfield themselves. Text console: Setup > Console Rotation in the menu."),
     meta.tableRotationOptions.map((opt) =>
       optionRow(opt, draft.tableRotation, (v) => { draft.tableRotation = v; }, "tableRotation")));
 }

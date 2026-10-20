@@ -37,12 +37,14 @@ case "$1" in
         if getent passwd vpinos >/dev/null; then
             # Written directly by vpinos-menu (boot-mode, gpu-driver,
             # console-rotation) and
-            # vpinos-config (hyprland.conf's monitor block) as `vpinos`,
+            # vpinos-config (hyprland.conf's monitor block,
+            # table-rotation.conf) as `vpinos`,
             # no sudo -- user-facing choices, not a privilege boundary.
             seed /etc/vpinos/boot-mode vpinos:vpinos 0644
             seed /etc/vpinos/gpu-driver vpinos:vpinos 0644
             seed /etc/vpinos/console-rotation vpinos:vpinos 0644
             seed /etc/vpinos/hyprland.conf vpinos:vpinos 0644
+            seed /etc/vpinos/table-rotation.conf vpinos:vpinos 0644
 
             home=$(getent passwd vpinos | cut -d: -f6)
             if [ -d "$home" ]; then

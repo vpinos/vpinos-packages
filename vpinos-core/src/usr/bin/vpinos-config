@@ -84,22 +84,32 @@ MODE_END_MARKER = "# END vpinos-monitor-modes"
 # not user-configurable, just which role goes on which workspace.
 ROLE_WORKSPACE = {"Table": 1, "Backglass": 2, "DMD": 3}
 
-# OS-level portrait mode for the Table monitor only -- written as
-# Hyprland's `transform, N` on the Table monitor's mode line (only when
-# non-zero), so every app sees a portrait playfield screen. Every other
-# monitor always stays unrotated. Values follow wl_output_transform
-# (1 = 90° counter-clockwise, 3 = 270° counter-clockwise, i.e. 90°
-# clockwise). Value, display name, description.
+# OS-level portrait mode for the Table monitor only, for every session
+# EXCEPT VPinball and VPinFE -- those rotate the playfield themselves, so
+# they must see the screen unrotated. That's why the rotation is NOT a
+# `transform` on hyprland.conf's mode lines (VPinball/VPinFE's own kiosk
+# config): Save writes the Table monitor's rotated `monitor = ...` line to
+# TABLE_ROTATION_CONF instead, and vpinos-launch applies it (`hyprctl
+# keyword monitor`) to every other client -- this tool, VPXConfig, the
+# installer, System Info, etc. -- before starting it. Every other monitor
+# always stays unrotated. Values follow wl_output_transform (1 = 90°
+# counter-clockwise, 3 = 270° counter-clockwise, i.e. 90° clockwise).
+# Value, display name, description.
 TABLE_ROTATION_OPTIONS = [
     (0, "Off (Landscape)",
-        "No OS rotation. VPinball and VPinFE rotate the playfield themselves -- "
-        "the usual setup for a landscape screen lying in the cabinet."),
+        "No OS rotation -- the usual setup for a landscape screen lying in the cabinet."),
     (1, "90° Left",
-        "Rotates the Table screen 90° counter-clockwise, so every app sees a "
-        "portrait screen. The usual choice for portrait mode."),
+        "Rotates the Table screen 90° counter-clockwise. The usual choice for portrait mode."),
     (3, "90° Right",
         "Rotates the Table screen 90° clockwise, for a screen mounted the other way round."),
 ]
+TABLE_ROTATION_CONF = "/etc/vpinos/table-rotation.conf"
+TABLE_ROTATION_HEADER = (
+    "# Written by vpinos-config's Save (Table Screen Rotation) -- don't edit by hand.\n"
+    "# vpinos-launch applies these lines (hyprctl keyword monitor) to every session\n"
+    "# except VPinball and VPinFE, which rotate the playfield themselves.\n"
+    "# No monitor line means no rotation.\n"
+)
 
 VPX_BINARY = "/opt/vpinball/VPinballX_BGFX"
 VPX_INI_PATH = os.path.expanduser("~/.local/share/VPinballX/10.8/VPinballX.ini")
@@ -435,7 +445,7 @@ def parse_existing_modes():
     return result
 
 
-def build_monitor_mode_lines(monitors, chosen_rates, chosen_transforms):
+def build_monitor_mode_lines(monitors, chosen_rates):
     # One line per *detected* monitor, not just role-assigned ones (see
     # MODE_BEGIN_MARKER's own comment for why) -- resolution@refresh is
     # the only thing this tool actually lets you choose; position is
@@ -480,18 +490,55 @@ def build_monitor_mode_lines(monitors, chosen_rates, chosen_transforms):
     # overlap bug either -- Hyprland just recomputes a wider auto-laid-
     # out desktop from these new, larger footprints.
     #
-    # Transform: appended only when non-zero (see ROTATION_OPTIONS).
-    # width/height stay the panel's native mode -- hyprctl reports them
-    # unrotated, and Hyprland swaps them itself once the transform applies.
+    # Never a `transform` here -- see TABLE_ROTATION_OPTIONS.
     lines = []
     for mon in monitors:
         rate = chosen_rates.get(mon["name"], current_rate_of(mon))
-        line = f"monitor = {mon['name']}, {mon['width']}x{mon['height']}@{rate:.2f}, auto, 1"
-        transform = chosen_transforms.get(mon["name"], 0)
-        if transform:
-            line += f", transform, {transform}"
-        lines.append(line)
+        lines.append(f"monitor = {mon['name']}, {mon['width']}x{mon['height']}@{rate:.2f}, auto, 1")
     return lines
+
+
+# ---- table rotation (see TABLE_ROTATION_OPTIONS) ----------------------------
+def read_table_rotation_lines():
+    # The `monitor = ...` values in TABLE_ROTATION_CONF (normally zero or
+    # one), without the `monitor =` prefix.
+    try:
+        with open(TABLE_ROTATION_CONF) as f:
+            content = f.read()
+    except OSError:
+        return []
+    return [
+        m.group(1).strip()
+        for m in re.finditer(r"^\s*monitor\s*=\s*(.+)$", content, re.MULTILINE)
+    ]
+
+
+def parse_table_rotation():
+    for value in read_table_rotation_lines():
+        t = re.search(r",\s*transform\s*,\s*(\d+)", value)
+        if t:
+            return int(t.group(1))
+    return 0
+
+
+def save_table_rotation(mode_line, transform):
+    # mode_line: the Table monitor's line from build_monitor_mode_lines()
+    # (so it carries the same resolution/refresh rate), or None. Width
+    # and height stay the panel's native mode -- hyprctl reports them
+    # unrotated, and Hyprland swaps them itself once the transform applies.
+    content = TABLE_ROTATION_HEADER
+    if mode_line and transform:
+        content += f"{mode_line}, transform, {transform}\n"
+    with open(TABLE_ROTATION_CONF, "w") as f:
+        f.write(content)
+
+
+def apply_table_rotation():
+    # Same thing vpinos-launch does before starting a non-VPinball/VPinFE
+    # client -- needed again here after Save's `hyprctl reload`, which
+    # drops it (this tool's own windowed config has no monitor lines).
+    for value in read_table_rotation_lines():
+        hyprctl("keyword", "monitor", value.replace(" ", ""))
 
 
 def ensure_vpinballx_ini():
@@ -779,10 +826,14 @@ class App:
                     "role": existing_roles.get(mon["name"], ""),
                 }
             )
-        # Only the Table monitor's saved transform counts (see
-        # TABLE_ROTATION_OPTIONS).
+        # Falls back to a `transform` on the Table monitor's hyprland.conf
+        # mode line -- where vpinos-core 1.1.5 saved it, before it moved to
+        # TABLE_ROTATION_CONF. The next Save moves it over (and drops it
+        # from hyprland.conf, where it wrongly rotated VPinball/VPinFE).
         table = next((name for name, role in existing_roles.items() if role == "Table"), None)
-        table_rotation = existing_modes.get(table, {}).get("transform", 0) if table else 0
+        table_rotation = parse_table_rotation()
+        if not table_rotation and table:
+            table_rotation = existing_modes.get(table, {}).get("transform", 0)
         return {
             "monitors": monitors,
             "tableRotation": table_rotation,
@@ -841,11 +892,8 @@ class App:
         table_rotation = body.get("tableRotation") or 0
         if table_rotation not in {v for v, _, _ in TABLE_ROTATION_OPTIONS}:
             return {"error": f"ERROR: invalid Table rotation {table_rotation!r}."}
-        chosen_transforms = {}
-        if table_rotation:
-            if "Table" not in role_to_monitor:
-                return {"error": "ERROR: Table Screen Rotation needs a monitor assigned the Table role."}
-            chosen_transforms[role_to_monitor["Table"]] = table_rotation
+        if table_rotation and "Table" not in role_to_monitor:
+            return {"error": "ERROR: Table Screen Rotation needs a monitor assigned the Table role."}
 
         lines = build_workspace_lines(role_to_monitor)
         try:
@@ -866,12 +914,19 @@ class App:
             save_marker_block(
                 MODE_BEGIN_MARKER,
                 MODE_END_MARKER,
-                build_monitor_mode_lines(self.monitors, chosen_rates, chosen_transforms),
+                build_monitor_mode_lines(self.monitors, chosen_rates),
             )
         except OSError as exc:
             return {"error": f"ERROR saving hyprland.conf: {exc}"}
         except RuntimeError as exc:
             return {"error": f"ERROR: {exc}"}
+
+        table_mon = next((m for m in self.monitors if m["name"] == role_to_monitor.get("Table")), None)
+        table_line = build_monitor_mode_lines([table_mon], chosen_rates)[0] if table_mon else None
+        try:
+            save_table_rotation(table_line, table_rotation)
+        except OSError as exc:
+            return {"error": f"Saved hyprland.conf, but ERROR saving {TABLE_ROTATION_CONF}: {exc}"}
 
         try:
             save_vpinball_settings(
@@ -899,6 +954,7 @@ class App:
         ok, detail = hyprctl_result("reload")
         if not ok:
             return {"message": f"Saved to {saved}, but reload failed: {detail}"}
+        apply_table_rotation()
         return {"message": f"Saved to {saved}, applied."}
 
 
