@@ -1,3 +1,18 @@
+vpinos-core (1.1.9) trixie; urgency=medium
+
+  * Every app now uses the same /etc/vpinos/hyprland.conf: the installer,
+    VPXConfig and VPinOS Configuration included, not just VPinball and
+    VPinFE. The monitor modes and Table/Backglass/DMD screens saved in
+    VPinOS Configuration now apply to all of them. Their floating,
+    windowed layout is now a mode inside hyprland.conf, and the separate
+    hyprland-installer.conf is no longer shipped. Existing cabinets keep
+    their current hyprland.conf, and keep using their old
+    hyprland-installer.conf for those apps.
+  * VPinOS Configuration opens on the Table screen. It used to open on
+    whichever screen Hyprland numbered first.
+
+ -- Superhac <superhac007@gmail.com>  Tue, 20 Oct 2026 09:24:55 -0500
+
 vpinos-core (1.1.8) trixie; urgency=medium
 
   * VPinOS Configuration fills the whole screen. Its window was floating

@@ -45,10 +45,10 @@
 # pointed at that server -- Chrome is this script's child, not
 # vpinos-launch's. Run via vpinos-menu option 1, or directly:
 #   /usr/bin/vpinos-launch vpinos-config /usr/bin/vpinos-config
-# vpinos-launch routes client_name "vpinos-config" to the windowed/floating
-# hyprland-installer.conf (same case arm as "vpxconfig"/"installer"),
-# not the kiosk config -- a config tool needs a visible, obvious way to
-# close it. vpinos-launch kills Hyprland once this script's process exits,
+# vpinos-launch starts Hyprland with the same /etc/vpinos/hyprland.conf
+# every client uses, in its windowed/floating mode (VPINOS_WINDOWED=1,
+# same case arm as "vpxconfig"/"installer"), not kiosk mode -- a config
+# tool needs a visible, obvious way to close it. vpinos-launch kills Hyprland once this script's process exits,
 # so main() waits for whichever of {Chrome, the HTTP server} stops
 # first and tears down the other before returning.
 import argparse
@@ -536,7 +536,7 @@ def save_table_rotation(mode_line, transform):
 def apply_table_rotation():
     # Same thing vpinos-launch does before starting a non-VPinball/VPinFE
     # client -- needed again here after Save's `hyprctl reload`, which
-    # drops it (this tool's own windowed config has no monitor lines).
+    # puts hyprland.conf's own unrotated mode lines back.
     for value in read_table_rotation_lines():
         hyprctl("keyword", "monitor", value.replace(" ", ""))
 
@@ -1060,8 +1060,8 @@ def maximize_chrome_window(timeout=20.0):
     # window floating at 780x585, centered, using a fraction of the
     # screen. So once the window has mapped, ask Hyprland to maximize it
     # (`fullscreen 1` = maximize, keeps the title bar and gaps). Done
-    # here rather than as a windowrule in hyprland-installer.conf, which
-    # is seed-only and never reaches existing cabinets. Runs on a
+    # here rather than as a windowrule in hyprland.conf, which is
+    # seed-only and never reaches existing cabinets. Runs on a
     # background thread, best-effort: on a timeout the window just stays
     # the size Chrome picked.
     deadline = time.monotonic() + timeout
@@ -1171,7 +1171,14 @@ def main():
         sys.exit(1)
 
     ordered = sorted(monitors, key=lambda m: m["id"])
-    menu_monitor = ordered[0]["name"]
+    # Open on the saved Table monitor -- where every other VPinOS app
+    # opens -- not just whichever output Hyprland numbered 0 (a real
+    # report: Table on DP-2, but this tool always came up on HDMI-A-2,
+    # ID 0). First monitor only when no Table is saved yet, or the saved
+    # one isn't connected.
+    names = {mon["name"] for mon in ordered}
+    table = next((n for n, role in parse_existing_roles().items() if role == "Table" and n in names), None)
+    menu_monitor = table or ordered[0]["name"]
     # Switch to the menu's own scratch workspace before Chrome ever
     # opens -- this runs before the server/Chrome are even started
     # below, so it's guaranteed to have already happened by the time

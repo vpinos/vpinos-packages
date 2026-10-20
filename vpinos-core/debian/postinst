@@ -31,8 +31,10 @@ seed() {
 case "$1" in
     configure)
         mkdir -p /etc/vpinos
-        # Root-owned: never written at runtime.
-        seed /etc/vpinos/hyprland-installer.conf root:root 0644
+        # hyprland-installer.conf is no longer seeded: hyprland.conf's
+        # windowed mode replaced it. Cabinets seeded before that keep
+        # their copy, and vpinos-launch still falls back to it while
+        # their hyprland.conf has no windowed mode.
 
         if getent passwd vpinos >/dev/null; then
             # Written directly by vpinos-menu (boot-mode, gpu-driver,

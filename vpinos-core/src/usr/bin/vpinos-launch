@@ -19,9 +19,9 @@
 #   e.g. vpinos-launch vpinball /opt/vpinball/VPinballX_BGFX -play /opt/vpinball/assets/exampleTable.vpx
 #        vpinos-launch vpinfe /opt/vpinfe/vpinfe
 #
-# The name "windowed" is reserved: it gets the floating/decorated
-# Hyprland config (see hypr_config below) instead of the default kiosk
-# one, for launching whatever one-off third-party app needs a real
+# The name "windowed" is reserved: it gets hyprland.conf's floating
+# windowed mode (see hypr_config below) instead of the default kiosk
+# mode, for launching whatever one-off third-party app needs a real
 # window on a given occasion, without having to add that app's own
 # name to vpinos-launch's hardcoded list (which stays for the few clients
 # this project itself always launches windowed: installer, vpxconfig,
@@ -459,18 +459,32 @@ chmod 1777 /tmp/.X11-unix 2>/dev/null || true
 # about how it's handling a client's surface) are a distinct signal
 # from the client's.
 #
-# The installer, vpxconfig and vpinos-config always get the windowed
-# config instead of the kiosk one, same as any caller using the
-# reserved "windowed" name (see top of file): the kiosk config forces
-# every toplevel fullscreen with no window chrome regardless of what
-# the app itself asks for (that's what stretched Calamares before it
-# got this same treatment under weston), which is right for
-# vpinball/vpinfe but wrong for a config tool -- or an arbitrary
-# windowed app -- the user needs a visible, obvious way to close. See
-# /etc/vpinos/hyprland-installer.conf.
+# Every client gets the same /etc/vpinos/hyprland.conf, so the monitor
+# modes and workspace-to-monitor assignment vpinos-config saves apply
+# to all of them. The installer, vpxconfig and vpinos-config -- and
+# any caller using the reserved "windowed"/"x11" names (see top of
+# file) -- get its windowed mode via VPINOS_WINDOWED=1 (`# hyprlang if`
+# blocks in that file): the kiosk mode forces every toplevel fullscreen
+# with no window chrome regardless of what the app itself asks for
+# (that's what stretched Calamares before it got this same treatment
+# under weston), which is right for vpinball/vpinfe but wrong for a
+# config tool -- or an arbitrary windowed app -- the user needs a
+# visible, obvious way to close. Exported here, after launch_client was
+# forked, so only Hyprland sees it.
+#
+# hyprland.conf is seed-only: a cabinet seeded before the windowed
+# blocks existed still has the kiosk-only file, which would force these
+# clients fullscreen. Those cabinets also still have the old separate
+# hyprland-installer.conf, so fall back to it there.
 hypr_config=/etc/vpinos/hyprland.conf
 case "$client_name" in
-    installer | x11 | vpxconfig | vpinos-config | windowed) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
+    installer | x11 | vpxconfig | vpinos-config | windowed)
+        export VPINOS_WINDOWED=1
+        if ! grep -q 'hyprlang if VPINOS_WINDOWED' "$hypr_config" 2>/dev/null &&
+            [ -e /etc/vpinos/hyprland-installer.conf ]; then
+            hypr_config=/etc/vpinos/hyprland-installer.conf
+        fi
+        ;;
 esac
 
 # --i-am-really-stupid: Hyprland refuses to run as root without this

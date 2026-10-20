@@ -64,7 +64,7 @@ one.
 ## Rules `vpinos-core` follows
 
 - **System config is placed once and never touched again.**
-  `/etc/vpinos/hyprland.conf`, `hyprland-installer.conf`, `boot-mode`,
+  `/etc/vpinos/hyprland.conf`, `boot-mode`,
   `gpu-driver` and `~vpinos/.config/vpinfe/` (ini and theme) ship as
   defaults under `/usr/share/vpinos/defaults/`. `postinst` copies each one
   into place the first time only, recorded by a stamp in
