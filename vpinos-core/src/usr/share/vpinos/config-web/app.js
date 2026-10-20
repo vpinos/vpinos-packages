@@ -36,6 +36,7 @@ function draftFromState(state) {
   return {
     roles,
     rates,
+    tableRotation: state.tableRotation,
     vpinballMode: state.vpinballMode,
     cabinetAutofitMode: state.cabinetAutofitMode,
     screenFields: { ...state.screenFields },
@@ -107,6 +108,15 @@ function monitorTable() {
       h("div", { class: "col role" }, "ROLE"),
       h("div", { class: "col rate" }, "REFRESH RATE")),
     monitors.map(monitorRow));
+}
+
+function tableRotationSection() {
+  return h("div", { class: "card section" },
+    h("div", { class: "section-title" }, "Table Screen Rotation"),
+    h("p", { class: "muted", style: "margin:0 4px 10px;" },
+      "Portrait mode -- applies only to the monitor assigned the Table role."),
+    meta.tableRotationOptions.map((opt) =>
+      optionRow(opt, draft.tableRotation, (v) => { draft.tableRotation = v; }, "tableRotation")));
 }
 
 function modeSection() {
@@ -183,6 +193,7 @@ function render() {
   root.replaceChildren(...[
     header(),
     monitorTable(),
+    tableRotationSection(),
     modeSection(),
     renderingOptions(),
     cabinetExtras(),

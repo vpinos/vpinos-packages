@@ -268,6 +268,55 @@ gpu_driver_submenu() {
     done
 }
 
+# Display name for /etc/vpinos/console-rotation's value (fbcon's own
+# numbering -- see vpinos-console-rotation.sh).
+console_rotation_name() {
+    case "$(cat /etc/vpinos/console-rotation 2>/dev/null)" in
+        3) echo "90 Left" ;;
+        1) echo "90 Right" ;;
+        *) echo "normal" ;;
+    esac
+}
+
+# Rotates this text console (fbcon) for a portrait-mounted Table
+# screen. Separate from vpinos-config's Table Screen Rotation, which
+# only rotates what Hyprland shows. Applies immediately (sudo'd helper,
+# see /etc/sudoers.d/vpinos-core) and on every boot after
+# (vpinos-console-rotation.service) -- on a live session the setting
+# itself is lost on reboot, same as GPU Driver.
+console_rotation_submenu() {
+    while true; do
+        clear
+        print_logo
+        echo "       Console Rotation"
+        echo "=============================="
+        echo "Currently: $(console_rotation_name)"
+        echo
+        echo "1) Normal (landscape, default)"
+        echo "2) 90 Left (portrait)"
+        echo "3) 90 Right (portrait)"
+        echo "q) Cancel, no change"
+        echo "=============================="
+        printf "Select an option: "
+        read -r rchoice
+        case "$rchoice" in
+            1) value=0 ;;
+            2) value=3 ;;
+            3) value=1 ;;
+            q|Q) return ;;
+            *)
+                echo "Invalid option"
+                sleep 1
+                continue
+                ;;
+        esac
+        echo "$value" > /etc/vpinos/console-rotation
+        sudo -n /usr/libexec/vpinos/vpinos-console-rotation.sh
+        echo "$(date -Is): menu: console-rotation set to $value" >>/var/log/vpinos-menu.log
+        return
+    done
+}
+
 # Everything that configures the cabinet rather than runs/tests it --
 # grouped here (instead of flat at the top level) once the menu grew
 # past half a dozen items. "VPinOS Configuration" was the top-level
@@ -281,15 +330,16 @@ setup_submenu() {
         echo "=============================="
         gcur=$(cat /etc/vpinos/gpu-driver 2>/dev/null)
         [ -z "$gcur" ] && gcur=default
-        echo "1) GPU Driver: $gcur"
-        echo "2) VPinOS Configuration"
-        echo "3) Network Settings"
-        echo "4) VPXConfig (Advanced VPinball Configuration)"
-        echo "5) VPinFE Map Controls"
+        echo "1) Console Rotation: $(console_rotation_name)"
+        echo "2) GPU Driver: $gcur"
+        echo "3) VPinOS Configuration"
+        echo "4) Network Settings"
+        echo "5) VPXConfig (Advanced VPinball Configuration)"
+        echo "6) VPinFE Map Controls"
         if is_installed; then
             bcur=$(cat /etc/vpinos/boot-mode 2>/dev/null)
             [ -z "$bcur" ] && bcur=menu
-            echo "6) Boot on startup: $bcur"
+            echo "7) Boot on startup: $bcur"
         fi
         echo "q) Back"
         echo "=============================="
@@ -298,14 +348,17 @@ setup_submenu() {
 
         case "$schoice" in
             1)
-                gpu_driver_submenu
+                console_rotation_submenu
                 ;;
             2)
+                gpu_driver_submenu
+                ;;
+            3)
                 echo "$(date -Is): menu: selected setup/vpinos-config" >>/var/log/vpinos-menu.log
                 /usr/bin/vpinos-launch vpinos-config /usr/bin/vpinos-config
                 echo "$(date -Is): menu: vpinos-launch exited $?" >>/var/log/vpinos-menu.log
                 ;;
-            3)
+            4)
                 # nmtui is a plain ncurses TUI (NetworkManager's own) --
                 # no display server needed, unlike every other option
                 # here, so it runs directly in this tty rather than
@@ -321,12 +374,12 @@ setup_submenu() {
                 sudo nmtui
                 echo "$(date -Is): menu: nmtui exited $?" >>/var/log/vpinos-menu.log
                 ;;
-            4)
+            5)
                 echo "$(date -Is): menu: selected setup/vpxconfig" >>/var/log/vpinos-menu.log
                 /usr/bin/vpinos-launch vpxconfig /usr/bin/vpxconfig --open-chrome
                 echo "$(date -Is): menu: vpinos-launch exited $?" >>/var/log/vpinos-menu.log
                 ;;
-            5)
+            6)
                 # --gamepadtest: vpinfe's own controller-mapping mode.
                 # Routed through vpinos-launch the same as plain vpinfe --
                 # still a real Wayland client needing Hyprland up, just
@@ -342,7 +395,7 @@ setup_submenu() {
                 /usr/bin/vpinos-launch vpinfe-gamepadtest /opt/vpinfe/vpinfe --gamepadtest
                 echo "$(date -Is): menu: vpinos-launch exited $?" >>/var/log/vpinos-menu.log
                 ;;
-            6)
+            7)
                 if is_installed; then
                     boot_mode_submenu
                 else

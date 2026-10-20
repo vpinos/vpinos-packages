@@ -1,0 +1,17 @@
+# Re-applies the console rotation chosen in vpinos-menu's Setup >
+# Console Rotation on every boot -- /sys/class/graphics/fbcon/rotate_all
+# doesn't persist across a reboot. Before getty@tty1.service so the
+# menu (auto-login on tty1) comes up already rotated. See
+# /usr/libexec/vpinos/vpinos-console-rotation.sh.
+[Unit]
+Description=VPinOS: apply the text console rotation
+After=local-fs.target
+Before=getty@tty1.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/vpinos/vpinos-console-rotation.sh
+
+[Install]
+WantedBy=multi-user.target

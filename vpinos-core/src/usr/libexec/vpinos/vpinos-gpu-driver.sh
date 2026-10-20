@@ -186,3 +186,9 @@ case "$mode" in
         modprobe nouveau 2>/dev/null || true
         ;;
 esac
+
+# Only reached after an actual driver switch (both early exits above
+# skip it): the newly loaded driver registered a fresh framebuffer,
+# whose console starts unrotated, so put the Console Rotation setting
+# back on it. Already root here, no sudo.
+/usr/libexec/vpinos/vpinos-console-rotation.sh || true

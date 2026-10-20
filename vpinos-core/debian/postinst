@@ -35,11 +35,13 @@ case "$1" in
         seed /etc/vpinos/hyprland-installer.conf root:root 0644
 
         if getent passwd vpinos >/dev/null; then
-            # Written directly by vpinos-menu (boot-mode, gpu-driver) and
+            # Written directly by vpinos-menu (boot-mode, gpu-driver,
+            # console-rotation) and
             # vpinos-config (hyprland.conf's monitor block) as `vpinos`,
             # no sudo -- user-facing choices, not a privilege boundary.
             seed /etc/vpinos/boot-mode vpinos:vpinos 0644
             seed /etc/vpinos/gpu-driver vpinos:vpinos 0644
+            seed /etc/vpinos/console-rotation vpinos:vpinos 0644
             seed /etc/vpinos/hyprland.conf vpinos:vpinos 0644
 
             home=$(getent passwd vpinos | cut -d: -f6)

@@ -44,6 +44,13 @@
 # narrow-scope reasoning as the three rules above.
 %sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-gpu-driver.sh
 
+# vpinos-menu's Setup > "Console Rotation" option -- writing
+# /sys/class/graphics/fbcon/rotate_all needs root. Scoped to this one
+# dedicated script, which takes no arguments and only writes a
+# validated value from /etc/vpinos/console-rotation, same narrow-scope
+# reasoning as every other rule here.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-console-rotation.sh
+
 # vpinos-menu's Testing submenu's "SSH Password Authentication" option
 # (live CD only) -- writing an sshd_config.d drop-in and restarting
 # ssh.service both need root. Scoped to this one dedicated script, same

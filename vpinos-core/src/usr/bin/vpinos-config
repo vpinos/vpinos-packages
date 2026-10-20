@@ -84,6 +84,23 @@ MODE_END_MARKER = "# END vpinos-monitor-modes"
 # not user-configurable, just which role goes on which workspace.
 ROLE_WORKSPACE = {"Table": 1, "Backglass": 2, "DMD": 3}
 
+# OS-level portrait mode for the Table monitor only -- written as
+# Hyprland's `transform, N` on the Table monitor's mode line (only when
+# non-zero), so every app sees a portrait playfield screen. Every other
+# monitor always stays unrotated. Values follow wl_output_transform
+# (1 = 90° counter-clockwise, 3 = 270° counter-clockwise, i.e. 90°
+# clockwise). Value, display name, description.
+TABLE_ROTATION_OPTIONS = [
+    (0, "Off (Landscape)",
+        "No OS rotation. VPinball and VPinFE rotate the playfield themselves -- "
+        "the usual setup for a landscape screen lying in the cabinet."),
+    (1, "90° Left",
+        "Rotates the Table screen 90° counter-clockwise, so every app sees a "
+        "portrait screen. The usual choice for portrait mode."),
+    (3, "90° Right",
+        "Rotates the Table screen 90° clockwise, for a screen mounted the other way round."),
+]
+
 VPX_BINARY = "/opt/vpinball/VPinballX_BGFX"
 VPX_INI_PATH = os.path.expanduser("~/.local/share/VPinballX/10.8/VPinballX.ini")
 
@@ -393,8 +410,9 @@ def current_rate_of(mon):
 
 def parse_existing_modes():
     # Same idea as parse_existing_roles(): pre-fill each monitor's
-    # refresh-rate choice from whatever's already saved, so reopening
-    # this tool doesn't reset a prior choice back to "whatever's current".
+    # refresh-rate and rotation choice from whatever's already saved, so
+    # reopening this tool doesn't reset a prior choice back to "whatever's
+    # current". Returns {name: {"rate": float, "transform": int}}.
     try:
         with open(HYPRLAND_CONF) as f:
             content = f.read()
@@ -409,11 +427,15 @@ def parse_existing_modes():
     for line in body.splitlines():
         m = re.match(r"\s*monitor\s*=\s*([^\s,]+)\s*,\s*\d+x\d+@([\d.]+)\s*,", line)
         if m:
-            result[m.group(1)] = round(float(m.group(2)), 2)
+            t = re.search(r",\s*transform\s*,\s*(\d+)", line)
+            result[m.group(1)] = {
+                "rate": round(float(m.group(2)), 2),
+                "transform": int(t.group(1)) if t else 0,
+            }
     return result
 
 
-def build_monitor_mode_lines(monitors, chosen_rates):
+def build_monitor_mode_lines(monitors, chosen_rates, chosen_transforms):
     # One line per *detected* monitor, not just role-assigned ones (see
     # MODE_BEGIN_MARKER's own comment for why) -- resolution@refresh is
     # the only thing this tool actually lets you choose; position is
@@ -457,10 +479,18 @@ def build_monitor_mode_lines(monitors, chosen_rates):
     # (above) means forcing scale=1 here doesn't risk reintroducing the
     # overlap bug either -- Hyprland just recomputes a wider auto-laid-
     # out desktop from these new, larger footprints.
+    #
+    # Transform: appended only when non-zero (see ROTATION_OPTIONS).
+    # width/height stay the panel's native mode -- hyprctl reports them
+    # unrotated, and Hyprland swaps them itself once the transform applies.
     lines = []
     for mon in monitors:
         rate = chosen_rates.get(mon["name"], current_rate_of(mon))
-        lines.append(f"monitor = {mon['name']}, {mon['width']}x{mon['height']}@{rate:.2f}, auto, 1")
+        line = f"monitor = {mon['name']}, {mon['width']}x{mon['height']}@{rate:.2f}, auto, 1"
+        transform = chosen_transforms.get(mon["name"], 0)
+        if transform:
+            line += f", transform, {transform}"
+        lines.append(line)
     return lines
 
 
@@ -704,6 +734,9 @@ class App:
         # source of truth) instead of duplicating it in app.js.
         return {
             "roles": list(ROLE_WORKSPACE.keys()),
+            "tableRotationOptions": [
+                {"value": v, "name": n, "description": d} for v, n, d in TABLE_ROTATION_OPTIONS
+            ],
             "identSeconds": IDENT_SECONDS,
             "cabinetAutofitOptions": [
                 {"value": v, "name": n, "description": d} for v, n, d in CABINET_AUTOFIT_OPTIONS
@@ -728,11 +761,11 @@ class App:
         # files) rather than cached once -- reflects any out-of-band
         # edits, and this is what pre-fills the page's fields.
         existing_roles = parse_existing_roles()
-        existing_rates = parse_existing_modes()
+        existing_modes = parse_existing_modes()
         monitors = []
         for mon in self.monitors:
             available_rates = refresh_rates_for(mon)
-            default_rate = existing_rates.get(mon["name"], current_rate_of(mon))
+            default_rate = existing_modes.get(mon["name"], {}).get("rate", current_rate_of(mon))
             if default_rate not in available_rates:
                 default_rate = available_rates[0]
             monitors.append(
@@ -746,8 +779,13 @@ class App:
                     "role": existing_roles.get(mon["name"], ""),
                 }
             )
+        # Only the Table monitor's saved transform counts (see
+        # TABLE_ROTATION_OPTIONS).
+        table = next((name for name, role in existing_roles.items() if role == "Table"), None)
+        table_rotation = existing_modes.get(table, {}).get("transform", 0) if table else 0
         return {
             "monitors": monitors,
+            "tableRotation": table_rotation,
             "vpinballMode": parse_existing_vpinball_mode(),
             "cabinetAutofitMode": parse_existing_cabinet_autofit_mode(),
             "screenFields": {key: parse_existing_screen_field(key) for key, _, _ in SCREEN_DIMENSION_FIELDS},
@@ -799,6 +837,16 @@ class App:
         if conflicts:
             return {"error": f"ERROR: {', '.join(sorted(conflicts))} assigned to more than one monitor."}
 
+        # Portrait mode only ever rotates the Table monitor.
+        table_rotation = body.get("tableRotation") or 0
+        if table_rotation not in {v for v, _, _ in TABLE_ROTATION_OPTIONS}:
+            return {"error": f"ERROR: invalid Table rotation {table_rotation!r}."}
+        chosen_transforms = {}
+        if table_rotation:
+            if "Table" not in role_to_monitor:
+                return {"error": "ERROR: Table Screen Rotation needs a monitor assigned the Table role."}
+            chosen_transforms[role_to_monitor["Table"]] = table_rotation
+
         lines = build_workspace_lines(role_to_monitor)
         try:
             save_workspace_lines(lines)
@@ -816,7 +864,9 @@ class App:
             chosen_rates[mon["name"]] = float(rate) if rate is not None else current_rate_of(mon)
         try:
             save_marker_block(
-                MODE_BEGIN_MARKER, MODE_END_MARKER, build_monitor_mode_lines(self.monitors, chosen_rates)
+                MODE_BEGIN_MARKER,
+                MODE_END_MARKER,
+                build_monitor_mode_lines(self.monitors, chosen_rates, chosen_transforms),
             )
         except OSError as exc:
             return {"error": f"ERROR saving hyprland.conf: {exc}"}

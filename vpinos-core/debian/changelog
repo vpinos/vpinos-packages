@@ -1,9 +1,25 @@
+vpinos-core (1.1.5) trixie; urgency=medium
+
+  * Portrait mode for a Table screen mounted in portrait.
+  * VPinOS Configuration: new Table Screen Rotation setting (Off,
+    90° Left, 90° Right). It rotates only the monitor assigned the Table
+    role, using Hyprland's monitor transform in hyprland.conf.
+  * Setup menu: new Console Rotation option (Normal, 90 Left, 90 Right),
+    now item 1, with the other Setup items moving down one. It rotates
+    the text console through fbcon, applies straight away, and is
+    re-applied at every boot by the new vpinos-console-rotation.service
+    and after a GPU driver switch. The setting is stored in
+    /etc/vpinos/console-rotation, with a passwordless sudoers rule
+    scoped to the new root helper.
+
+ -- Superhac <superhac007@gmail.com>  Tue, 20 Oct 2026 05:50:24 -0500
+
 vpinos-core (1.1.4) trixie; urgency=medium
 
   * vpinos-config add Priority.B2S = 2 to the VPinballX.ini config for
     the switch from b2slegacy to b2s as the default plugin.
 
- -- Superhac <superhac007@gmail.com>  Fri, 16 Oct 2026 11:59:31 -0500
+ -- Superhac <superhac007@gmail.com>  Fri, 17 Oct 2026 11:59:31 -0500
 
 vpinos-core (1.1.3) trixie; urgency=medium
 
