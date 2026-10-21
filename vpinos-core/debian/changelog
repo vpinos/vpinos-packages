@@ -1,3 +1,12 @@
+vpinos-core (1.1.11) trixie; urgency=medium
+
+  * Removed Setup > Audio Setup from the menu. The sound output is set in
+    VPinOS Configuration's Sound Output section, and System Info lists
+    every sound device. Network Settings, VPXConfig and VPinFE Map
+    Controls are back to their old numbers in Setup.
+
+ -- Superhac <superhac007@gmail.com>  Wed, 21 Oct 2026 08:14:12 -0500
+
 vpinos-core (1.1.10) trixie; urgency=medium
 
   * VPinOS Configuration has a Sound Output section: pick the sound

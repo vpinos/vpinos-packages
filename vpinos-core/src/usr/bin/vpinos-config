@@ -763,7 +763,7 @@ def save_vpinfe_settings(role_to_monitor, id_by_monitor):
 
 # ---- Sound ------------------------------------------------------------------
 # Devices, their profiles and the sinks come from vpinos-audio-enum.sh,
-# the same listing as the menu's Setup > Audio Setup and System Info.
+# the same listing as System Info's Sound section.
 # PipeWire's ids only last until a restart, so they're never written
 # anywhere by this tool: wpctl hands the choice to WirePlumber, which
 # saves it under ~/.local/state/wireplumber by name and restores it at

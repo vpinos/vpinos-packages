@@ -197,7 +197,7 @@ function soundSection() {
   section.append(
     h("p", { class: "muted", style: "margin:0 4px 10px;" },
       "The device and profile that VPinball, VPinFE and everything else play through. " +
-      "Save makes it the default output. Setup > Audio Setup in the menu lists every device's profiles."),
+      "Save makes it the default output. Tools > System Info in the menu lists every device's profiles."),
     h("div", { class: "card-row field" },
       h("div", { class: "text-col" }, h("div", { class: "option-name" }, "Device")),
       select(dev.id, audio.devices.map((d) => ({ id: d.id, label: d.name })), (id) => {

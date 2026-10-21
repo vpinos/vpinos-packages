@@ -325,7 +325,7 @@ def display_section():
 
 # ---- Sound ------------------------------------------------------------------
 def sound_section():
-    # The same listing as the menu's Setup > Audio Setup. The script prints
+    # The same listing VPinOS Configuration's Sound Output reads. The script prints
     # each block as a title between two ==== rules followed by its lines
     # (a device's profiles, or the sinks); each block becomes one row.
     # Through bash, not exec'd: the checkout's copy isn't executable (the

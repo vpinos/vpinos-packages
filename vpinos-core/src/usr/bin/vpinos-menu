@@ -333,14 +333,13 @@ setup_submenu() {
         echo "1) Console Rotation: $(console_rotation_name)"
         echo "2) GPU Driver: $gcur"
         echo "3) VPinOS Configuration"
-        echo "4) Audio Setup"
-        echo "5) Network Settings"
-        echo "6) VPXConfig (Advanced VPinball Configuration)"
-        echo "7) VPinFE Map Controls"
+        echo "4) Network Settings"
+        echo "5) VPXConfig (Advanced VPinball Configuration)"
+        echo "6) VPinFE Map Controls"
         if is_installed; then
             bcur=$(cat /etc/vpinos/boot-mode 2>/dev/null)
             [ -z "$bcur" ] && bcur=menu
-            echo "8) Boot on startup: $bcur"
+            echo "7) Boot on startup: $bcur"
         fi
         echo "q) Back"
         echo "=============================="
@@ -360,15 +359,6 @@ setup_submenu() {
                 echo "$(date -Is): menu: vpinos-launch exited $?" >>/var/log/vpinos-menu.log
                 ;;
             4)
-                # Runs straight in this tty, like nmtui -- PipeWire's
-                # tools need no Hyprland. It only prints, so wait before
-                # the menu clears the screen.
-                echo "$(date -Is): menu: selected setup/audio" >>/var/log/vpinos-menu.log
-                /usr/libexec/vpinos/vpinos-audio-enum.sh
-                echo "$(date -Is): menu: vpinos-audio-enum.sh exited $?" >>/var/log/vpinos-menu.log
-                pause
-                ;;
-            5)
                 # nmtui is a plain ncurses TUI (NetworkManager's own) --
                 # no display server needed, unlike every other option
                 # here, so it runs directly in this tty rather than
@@ -384,12 +374,12 @@ setup_submenu() {
                 sudo nmtui
                 echo "$(date -Is): menu: nmtui exited $?" >>/var/log/vpinos-menu.log
                 ;;
-            6)
+            5)
                 echo "$(date -Is): menu: selected setup/vpxconfig" >>/var/log/vpinos-menu.log
                 /usr/bin/vpinos-launch vpxconfig /usr/bin/vpxconfig --open-chrome
                 echo "$(date -Is): menu: vpinos-launch exited $?" >>/var/log/vpinos-menu.log
                 ;;
-            7)
+            6)
                 # --gamepadtest: vpinfe's own controller-mapping mode.
                 # Routed through vpinos-launch the same as plain vpinfe --
                 # still a real Wayland client needing Hyprland up, just
@@ -405,7 +395,7 @@ setup_submenu() {
                 /usr/bin/vpinos-launch vpinfe-gamepadtest /opt/vpinfe/vpinfe --gamepadtest
                 echo "$(date -Is): menu: vpinos-launch exited $?" >>/var/log/vpinos-menu.log
                 ;;
-            8)
+            7)
                 if is_installed; then
                     boot_mode_submenu
                 else
