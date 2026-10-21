@@ -122,6 +122,19 @@ label.option { cursor: pointer; }
 }
 .num-input:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 
+.select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  width: 520px;
+  max-width: 70%;
+  font-size: 14px;
+  flex: none;
+}
+.select:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+
 /* ---- status / buttons ---- */
 .status { min-height: 22px; text-align: center; margin: 16px 0; font-size: 14px; }
 .status.ok { color: var(--success-hover); }

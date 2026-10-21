@@ -22,6 +22,7 @@ function h(tag, attrs, ...kids) {
 
 let meta = null;
 let monitors = [];   // last /api/state fetch's monitor list: [{name,id,description,geometry,rates,rate,role}]
+let audio = null;    // last /api/state fetch's sound devices: {devices: [{id,name,active,profiles}], error?}
 let draft = null;    // editable snapshot, exactly the /api/save body shape
 let lastSaved = null; // JSON string of draft right after a load/save, to detect unsaved edits
 let identifying = false;
@@ -44,12 +45,14 @@ function draftFromState(state) {
     syncMode: state.syncMode,
     maxFramerate: state.maxFramerate,
     maxPrerenderedFrames: state.maxPrerenderedFrames,
+    audio: { device: state.audio.device, profile: state.audio.profile },
   };
 }
 
 async function load() {
   const state = await api.get("/api/state");
   monitors = state.monitors;
+  audio = state.audio;
   draft = draftFromState(state);
   lastSaved = JSON.stringify(draft);
 }
@@ -178,6 +181,38 @@ function cabinetExtras() {
         h("p", { class: "muted" }, meta.fulldmdDescription))));
 }
 
+// A pulldown per choice: the device, then that device's profiles. Save
+// switches the device to the profile and makes its sink the default.
+function soundSection() {
+  const section = h("div", { class: "card section" },
+    h("div", { class: "section-title" }, "Sound Output"));
+  if (!audio.devices.length) {
+    section.append(h("p", { class: "muted", style: "margin:0 4px;" },
+      audio.error ? `Couldn't list sound devices: ${audio.error}` : "No sound output devices found."));
+    return section;
+  }
+  const dev = audio.devices.find((d) => d.id === draft.audio.device) || audio.devices[0];
+  const select = (value, options, onChange) => h("select", { class: "select", onchange: (e) => { onChange(Number(e.target.value)); render(); } },
+    options.map((o) => h("option", { value: String(o.id), selected: o.id === value }, o.label)));
+  section.append(
+    h("p", { class: "muted", style: "margin:0 4px 10px;" },
+      "The device and profile that VPinball, VPinFE and everything else play through. " +
+      "Save makes it the default output. Setup > Audio Setup in the menu lists every device's profiles."),
+    h("div", { class: "card-row field" },
+      h("div", { class: "text-col" }, h("div", { class: "option-name" }, "Device")),
+      select(dev.id, audio.devices.map((d) => ({ id: d.id, label: d.name })), (id) => {
+        const next = audio.devices.find((d) => d.id === id);
+        const ids = next.profiles.map((p) => p.id);
+        draft.audio = { device: id, profile: ids.includes(next.active) ? next.active : ids[0] };
+      })),
+    h("div", { class: "card-row field" },
+      h("div", { class: "text-col" }, h("div", { class: "option-name" }, "Profile")),
+      select(draft.audio.profile, dev.profiles.map((p) => ({ id: p.id, label: p.description })), (id) => {
+        draft.audio.profile = id;
+      })));
+  return section;
+}
+
 function statusLine() {
   if (!statusMsg) return h("div", { class: "status" });
   return h("div", { class: "status " + statusMsg.kind }, statusMsg.text);
@@ -198,6 +233,7 @@ function render() {
     modeSection(),
     renderingOptions(),
     cabinetExtras(),
+    soundSection(),
     statusLine(),
     buttons(),
   ].filter(Boolean));

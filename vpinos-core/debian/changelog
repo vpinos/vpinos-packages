@@ -1,3 +1,16 @@
+vpinos-core (1.1.10) trixie; urgency=medium
+
+  * VPinOS Configuration has a Sound Output section: pick the sound
+    device and its profile, and Save makes that the output everything
+    plays through.
+  * New Setup > Audio Setup in the menu lists every sound device's
+    profiles, with the active one marked, and every output with its
+    volume, with the default marked. The menu's Setup options after
+    VPinOS Configuration each moved down one.
+  * System Info has a Sound section with the same listing.
+
+ -- Superhac <superhac007@gmail.com>  Wed, 21 Oct 2026 06:44:24 -0500
+
 vpinos-core (1.1.9) trixie; urgency=medium
 
   * Every app now uses the same /etc/vpinos/hyprland.conf: the installer,

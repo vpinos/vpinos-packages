@@ -25,7 +25,9 @@
 # VPinballX.ini -- hidden entirely in Desktop mode, since VPinballX.ini's
 # own comments say they only matter in Cabinet mode. Save also always
 # sets Priority.ScoreView/PUP/B2SLegacyDMD/B2S to fixed values, regardless
-# of mode or role assignment.
+# of mode or role assignment. A Sound Output section picks the output
+# device and its profile; Save switches the device to that profile and
+# makes its sink the default (see apply_audio()).
 #
 # The UI is a small local web server (stdlib http.server only, no
 # dependencies) plus a plain HTML/JS/CSS page in /usr/share/vpinos/config-web/,
@@ -759,8 +761,136 @@ def save_vpinfe_settings(role_to_monitor, id_by_monitor):
         f.write(content)
 
 
+# ---- Sound ------------------------------------------------------------------
+# Devices, their profiles and the sinks come from vpinos-audio-enum.sh,
+# the same listing as the menu's Setup > Audio Setup and System Info.
+# PipeWire's ids only last until a restart, so they're never written
+# anywhere by this tool: wpctl hands the choice to WirePlumber, which
+# saves it under ~/.local/state/wireplumber by name and restores it at
+# login.
+AUDIO_ENUM = "/usr/libexec/vpinos/vpinos-audio-enum.sh"
+AUDIO_DEVICE_RE = re.compile(r"^Device ID: (\d+)\s+\((.*)\)$")
+AUDIO_PROFILE_RE = re.compile(r"^([* ]) ID: (\d+)\s+Profile: (\S+)\s*(.*?)\s*$")
+AUDIO_SINK_RE = re.compile(r"^([* ]) ID: (\d+)\s+Volume:")
+SINK_WAIT_SECONDS = 5
 
-WEB = Path("/usr/share/vpinos/config-web")
+
+def read_audio():
+    # {"devices": [{id, name, active, profiles: [{id, name, description}]}],
+    #  "sinks": [{id, default}]}. A device's * marks its active profile,
+    # a sink's * the default sink.
+    proc = subprocess.run(["bash", AUDIO_ENUM], capture_output=True, text=True, timeout=10)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or f"{AUDIO_ENUM} failed")
+    devices, sinks = [], []
+    device = None
+    in_sinks = False
+    for line in proc.stdout.splitlines():
+        m = AUDIO_DEVICE_RE.match(line)
+        if m:
+            device = {"id": int(m[1]), "name": m[2], "active": None, "profiles": []}
+            devices.append(device)
+            in_sinks = False
+            continue
+        if line == "Sinks":
+            device, in_sinks = None, True
+            continue
+        m = AUDIO_SINK_RE.match(line)
+        if in_sinks and m:
+            sinks.append({"id": int(m[2]), "default": m[1] == "*"})
+            continue
+        m = AUDIO_PROFILE_RE.match(line)
+        if device is not None and m:
+            profile = {"id": int(m[2]), "name": m[3], "description": m[4] or m[3]}
+            device["profiles"].append(profile)
+            if m[1] == "*":
+                device["active"] = profile["id"]
+    return {"devices": devices, "sinks": sinks}
+
+
+def output_profiles(device):
+    # Only profiles that give the device a sink: not "off", and not an
+    # input-only one, either of which would leave nothing to make default.
+    return [p for p in device["profiles"] if p["name"] != "off" and not p["name"].startswith("input:")]
+
+
+def sink_device(sink_id):
+    proc = subprocess.run(["wpctl", "inspect", str(sink_id)], capture_output=True, text=True, check=False)
+    m = re.search(r'device\.id = "(\d+)"', proc.stdout)
+    return int(m[1]) if m else None
+
+
+def audio_state():
+    # The device whose sink is the current default, and its active
+    # profile -- what the page's two dropdowns start on.
+    audio = read_audio()
+    devices = []
+    for dev in audio["devices"]:
+        profiles = output_profiles(dev)
+        if profiles:
+            devices.append({"id": dev["id"], "name": dev["name"], "active": dev["active"], "profiles": profiles})
+    default_sink = next((s["id"] for s in audio["sinks"] if s["default"]), None)
+    current = sink_device(default_sink) if default_sink is not None else None
+    if current not in {d["id"] for d in devices}:
+        current = devices[0]["id"] if devices else None
+    profile = None
+    for dev in devices:
+        if dev["id"] == current:
+            ids = [p["id"] for p in dev["profiles"]]
+            profile = dev["active"] if dev["active"] in ids else ids[0]
+    return {"devices": devices, "device": current, "profile": profile}
+
+
+def apply_audio(device_id, profile_id):
+    # Switches the device to the profile, waits for the sink that profile
+    # creates, and makes that sink the default. Returns a description of
+    # what changed, or None when both were already set.
+    audio = read_audio()
+    dev = next((d for d in audio["devices"] if d["id"] == device_id), None)
+    if dev is None:
+        raise RuntimeError(f"no audio device {device_id}")
+    profile = next((p for p in output_profiles(dev) if p["id"] == profile_id), None)
+    if profile is None:
+        raise RuntimeError(f"{dev['name']} has no output profile {profile_id}")
+
+    default_sink = next((s["id"] for s in audio["sinks"] if s["default"]), None)
+    if dev["active"] == profile_id and default_sink is not None and sink_device(default_sink) == device_id:
+        return None
+
+    def device_sinks(sinks):
+        return [s["id"] for s in sinks if sink_device(s["id"]) == device_id]
+
+    changing = dev["active"] != profile_id
+    before = set(device_sinks(audio["sinks"]))
+    if changing:
+        proc = subprocess.run(
+            ["wpctl", "set-profile", str(device_id), str(profile_id)], capture_output=True, text=True, check=False
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr.strip() or "wpctl set-profile failed")
+
+    # The new profile's sink replaces the old one a moment after
+    # set-profile returns -- until the list changes, a sink still there
+    # is the old profile's, on its way out. A profile with several sinks
+    # (pro-audio) gets its first one.
+    deadline = time.monotonic() + SINK_WAIT_SECONDS
+    while True:
+        sinks = device_sinks(read_audio()["sinks"])
+        if sinks and (not changing or set(sinks) != before):
+            break
+        if time.monotonic() > deadline:
+            if sinks:
+                break
+            raise RuntimeError(f"{profile['description']} on {dev['name']} didn't create a sink")
+        time.sleep(0.25)
+    sink = sinks[0]
+    proc =subprocess.run(["wpctl", "set-default", str(sink)], capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "wpctl set-default failed")
+    return f"{dev['name']}, {profile['description']}"
+
+
+WEB =Path("/usr/share/vpinos/config-web")
 API_HEADER = "X-VPinOS-Config"  # required on POSTs -- forces a CORS preflight from other sites, same as vpxconfig
 
 
@@ -844,7 +974,16 @@ class App:
             "syncMode": parse_existing_sync_mode(),
             "maxFramerate": parse_existing_screen_field(MAX_FRAMERATE_FIELD[0]),
             "maxPrerenderedFrames": parse_existing_max_prerendered_frames(),
+            "audio": self.audio_state(),
         }
+
+    def audio_state(self):
+        # Never fails the page: with no PipeWire (or no sound card) the
+        # Sound section just says why.
+        try:
+            return audio_state()
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            return {"devices": [], "device": None, "profile": None, "error": str(exc)}
 
     def show(self, name):
         mon = next((m for m in self.monitors if m["name"] == name), None)
@@ -951,11 +1090,22 @@ class App:
             except (OSError, RuntimeError) as exc:
                 return {"error": f"Saved {saved}, but ERROR saving vpinfe.ini: {exc}"}
 
+        audio = body.get("audio") or {}
+        sound = None
+        if audio.get("device") is not None and audio.get("profile") is not None:
+            try:
+                sound = apply_audio(int(audio["device"]), int(audio["profile"]))
+            except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                return {"error": f"Saved {saved}, but ERROR setting the sound output: {exc}"}
+        applied = f"Saved to {saved}, applied."
+        if sound:
+            applied += f" Sound output: {sound}."
+
         ok, detail = hyprctl_result("reload")
         if not ok:
             return {"message": f"Saved to {saved}, but reload failed: {detail}"}
         apply_table_rotation()
-        return {"message": f"Saved to {saved}, applied."}
+        return {"message": applied}
 
 
 def make_handler(app, allowed_hosts, shutdown=None):

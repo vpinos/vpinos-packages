@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Debugging snapshot tool: VPinOS version, video driver (mode + the GPU(s)
 # actually detected, VRAM, kernel driver in use), display info (from
-# Hyprland), CPU and memory. Gathers everything first and always writes a
+# Hyprland), CPU, memory and sound devices (vpinos-audio-enum.sh). Gathers everything first and always writes a
 # fresh, timestamped text file to the vpinos home dir -- before ever
 # touching a display -- so it's still useful run headless over SSH when
 # that's exactly the kind of thing being debugged; showing it fullscreen on
@@ -30,6 +30,16 @@ HOME = os.path.expanduser("~")
 OS_RELEASE = "/etc/os-release"
 GPU_DRIVER_FILE = "/etc/vpinos/gpu-driver"
 GPU_CLASSES = ("VGA compatible controller", "3D controller", "Display controller")
+# Next to this file: /usr/libexec/vpinos once installed, and the checkout's
+# copy when run from the repo to test.
+AUDIO_ENUM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vpinos-audio-enum.sh")
+
+
+class Pre(str):
+    # A row value that's already laid out in columns (vpinos-audio-enum.sh's
+    # output): shown in a monospace font on its own line under the label,
+    # never wrapped, so the columns and * markers stay lined up.
+    pass
 
 
 # ---- Hyprland/Xwayland plumbing -- copied from vpinos-config, same
@@ -79,7 +89,7 @@ def run_text(argv):
     # keep going.
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=10)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
         return None
     return proc.stdout if proc.returncode == 0 else None
 
@@ -313,6 +323,33 @@ def display_section():
     return rows
 
 
+# ---- Sound ------------------------------------------------------------------
+def sound_section():
+    # The same listing as the menu's Setup > Audio Setup. The script prints
+    # each block as a title between two ==== rules followed by its lines
+    # (a device's profiles, or the sinks); each block becomes one row.
+    # Through bash, not exec'd: the checkout's copy isn't executable (the
+    # package sets the mode, see debian/rules).
+    out = run_text(["bash", AUDIO_ENUM])
+    if out is None:
+        return [("Sound", f"{AUDIO_ENUM} failed")]
+    rows = []
+    lines = out.splitlines()
+    i = 0
+    while i < len(lines):
+        if lines[i].startswith("====") and i + 2 < len(lines) and lines[i + 2].startswith("===="):
+            title = lines[i + 1]
+            i += 3
+            body = []
+            while i < len(lines) and lines[i].strip() and not lines[i].startswith("===="):
+                body.append(lines[i])
+                i += 1
+            rows.append((title, Pre("\n".join(body)) if body else "none"))
+        else:
+            i += 1
+    return rows or [("Sound", "no audio devices found")]
+
+
 # ---- CPU ----------------------------------------------------------------
 def cpu_section():
     out = run_text(["lscpu", "-J"])
@@ -370,6 +407,7 @@ def gather_report():
         ("Displays", display_section()),
         ("CPU", cpu_section()),
         ("Memory", memory_section()),
+        ("Sound", sound_section()),
     ]
 
 
@@ -383,7 +421,11 @@ def write_report_file(report):
     for title, rows in report:
         lines.append(f"== {title} ==")
         for label, value in rows:
-            lines.append(f"{label}: {value}")
+            if isinstance(value, Pre):
+                lines.append(f"{label}:")
+                lines.extend(f"  {line}" for line in value.splitlines())
+            else:
+                lines.append(f"{label}: {value}")
         lines.append("")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -458,7 +500,18 @@ def render_gui(report, file_path):
         grid = tk.Frame(card, bg=CARD_BG)
         grid.pack(anchor="w", fill="x", padx=18, pady=(0, 16))
         grid.grid_columnconfigure(1, weight=1)
-        for r, (label, value) in enumerate(rows):
+        r = 0
+        for label, value in rows:
+            if isinstance(value, Pre):
+                tk.Label(
+                    grid, text=label, bg=CARD_BG, fg=TEXT, font=("sans", 13, "bold"), anchor="w",
+                ).grid(row=r, column=0, columnspan=2, sticky="nw", pady=(6, 2))
+                tk.Label(
+                    grid, text=value, bg=CARD_BG, fg=MUTED, font=("monospace", 11), anchor="w",
+                    justify="left",
+                ).grid(row=r + 1, column=0, columnspan=2, sticky="nw", pady=(0, 6))
+                r += 2
+                continue
             tk.Label(
                 grid, text=label, bg=CARD_BG, fg=TEXT, font=("sans", 13, "bold"), anchor="w",
             ).grid(row=r, column=0, sticky="nw", padx=(0, 24), pady=3)
@@ -466,6 +519,7 @@ def render_gui(report, file_path):
                 grid, text=str(value), bg=CARD_BG, fg=MUTED, font=("sans", 13), anchor="w",
                 justify="left", wraplength=900,
             ).grid(row=r, column=1, sticky="nw", pady=3)
+            r += 1
 
     button_row = tk.Frame(scroll_frame, bg=BG)
     button_row.pack(pady=(8, 30))
