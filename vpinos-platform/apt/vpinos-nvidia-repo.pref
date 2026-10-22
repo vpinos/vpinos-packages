@@ -69,13 +69,18 @@ Pin-Priority: -1
 # 1001 beats the 900 below, and -* allows NVIDIA repackaging revisions
 # of the same driver, which still match the modules.
 #
+# ^libxnvctrl: libxnvctrl0 has no "nvidia" in its name, so it was left
+# unpinned and floated to NVIDIA's newest release, while nvidia-settings
+# (held here) Depends on libxnvctrl0 (= its own version): uninstallable.
+# Any new NVIDIA package that doesn't match this regex breaks the same way.
+#
 # Bumping the driver: change this version and rebuild the ISO. The 0120
 # hook reads it back from here and fails the build if NVIDIA's repo no
 # longer serves it, so this can't silently stop matching anything.
-Package: /nvidia|^libcuda|^libnv/
+Package: /nvidia|^libcuda|^libnv|^libxnvctrl/
 Pin: version 615.71.09-*
 Pin-Priority: 1001
 
-Package: nvidia-driver nvidia-kernel-open-dkms nvidia-kernel-common nvidia-kernel-support nvidia-smi libnvidia-* nvidia-settings nvidia-modprobe nvidia-persistenced nvidia-xconfig
+Package: nvidia-driver nvidia-kernel-open-dkms nvidia-kernel-common nvidia-kernel-support nvidia-smi libnvidia-* nvidia-settings libxnvctrl0 nvidia-modprobe nvidia-persistenced nvidia-xconfig
 Pin: origin developer.download.nvidia.com
 Pin-Priority: 900
