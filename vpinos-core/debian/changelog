@@ -1,3 +1,19 @@
+vpinos-core (1.1.13) trixie; urgency=medium
+
+  * New menu: the VPinOS menu is now a full-screen menu with the logo,
+    version and IP at the top. Move with the arrow keys and Enter, or
+    press the same number and letter keys as before; Esc or q goes back,
+    and every submenu has a Back item for cabinets with only a joystick
+    and buttons. The highlighted item is described under the list, and
+    settings show their current value next to them.
+  * Console Rotation, GPU Driver, Boot on startup and SSH Password
+    Authentication open a list of choices with the current one marked.
+    Shutdown and Reboot ask Yes/No.
+  * The old text menu is still there and comes up if the new one can't
+    run (the console fallback when kmscon fails).
+
+ -- Superhac <superhac007@gmail.com>  Sat, 24 Oct 2026 16:46:45 -0500
+
 vpinos-core (1.1.12) trixie; urgency=medium
 
   * The console the menu runs in is now kmscon instead of the kernel's

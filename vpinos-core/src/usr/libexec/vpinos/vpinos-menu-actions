@@ -1,0 +1,427 @@
+#!/bin/sh
+# Everything a vpinos-menu item does, shared by both menus: the Textual
+# one (vpinos_menu.py, on kmscon) and the plain POSIX one
+# (vpinos-menu-classic, on the fbcon fallback). The menus only draw
+# items and ask; what an item launches, logs and changes lives here
+# once, so the two can't drift apart.
+#
+#   vpinos-menu-actions <action> [arg]
+#
+# or sourced by vpinos-menu-classic (VPINOS_MENU_LIB=1) to call the
+# action_* functions directly. Every action runs in the menu's own
+# terminal -- the Textual menu suspends itself first -- so apt output,
+# nmtui and the "Press Enter" pauses work the same in both. Questions
+# that decide whether an action runs at all (Shutdown now?) are the
+# menus' job; questions in the middle of one (install VPX Editor
+# first?) stay here.
+#
+# Only the installer is `sudo`'d -- it genuinely needs root for
+# partitioning. vpinball/vpinfe/Chrome run directly as whichever user
+# is running this menu (`vpinos`, in normal operation): seatd's default
+# config already grants DRM/seat access to `video`-group members, no
+# root required.
+#
+# VPXConfig and vpinos-config (cabinet configuration -- monitor
+# roles/refresh rates, VPinball Mode, Rendering Options, Cabinet
+# Autofit/Screen Dimensions/Full DMD) are both local web servers (the
+# UI opens in a windowed Chrome, not the fullscreen kiosk one -- see
+# vpinos-launch's hypr_config case arm) that each spawn and own their own
+# Chrome process once vpinos-launch starts them (vpxconfig via its
+# --open-chrome flag; vpinos-config always, since it needs Hyprland
+# running for its hyprctl calls, same as any other graphical client
+# here). Each is vpinos-launch's actual client, so Quit in the page
+# closes the browser window too, and plain vpinos-launch client/exit-code
+# handling is all that's needed.
+
+log() {
+    echo "$(date -Is): menu: $*" >>/var/log/vpinos-menu.log
+}
+
+# /etc/vpinos/boot-mode is what /etc/profile.d/vpinos-menu.sh reads at
+# login to decide what to auto-launch before falling through to the
+# menu. Changing it only makes sense on an INSTALLED system -- a live
+# session never persists it across a reboot, and boot=live on the kernel
+# cmdline is the same mechanism live-config itself already uses to tell
+# the two apart (see notes/vpinos.md step 5). "Boot on startup" simply
+# doesn't exist on a live session -- not shown, not selectable.
+is_installed() {
+    ! grep -q 'boot=live' /proc/cmdline 2>/dev/null
+}
+
+# Whether the menu is running in kmscon (tty1's console, see
+# /usr/libexec/vpinos/vpinos-kmscon) rather than on fbcon (the
+# getty@tty1 fallback) or over SSH.
+on_kmscon() {
+    [ "$TERM" = kmscon ] && [ -z "$SSH_CONNECTION" ]
+}
+
+pause() {
+    printf "Press Enter to continue..."
+    read -r _
+}
+
+# On kmscon, Console Rotation and GPU Driver only take effect when the
+# console restarts: kmscon reads its rotation at startup, and it holds
+# the GPU open, so the driver switch runs just before it starts. The
+# restart ends this session; autologin brings the menu straight back,
+# so the sleep is only there until it does. On fbcon nothing restarts:
+# the rotation already applied, and the driver switches at the next
+# launch, as before.
+restart_console() {
+    echo "Restarting the console..."
+    log "restarting the console ($1)"
+    sudo -n /usr/libexec/vpinos/vpinos-console-restart.sh
+    sleep 10
+}
+
+vr_installed() {
+    [ "$(/usr/libexec/vpinos/vpinos-vr-setup.sh status 2>/dev/null)" = installed ]
+}
+
+vpx_editor_installed() {
+    [ "$(/usr/libexec/vpinos/vpinos-vpx-editor-setup.sh status 2>/dev/null)" = installed ]
+}
+
+# Runs vpinos-launch and logs how it ended, the same two log lines every
+# graphical item has always written.
+launch() {
+    /usr/bin/vpinos-launch "$@"
+    log "vpinos-launch exited $?"
+}
+
+# Launches the bundled example table from a per-user copy instead of
+# /opt/vpinball/assets directly. VPX writes its compressed-texture cache
+# next to the table (<table dir>/cache/<table>/), and /opt/vpinball is
+# root-owned (the vpinball package's), so launched from there VPX logged
+# "Failed to create Cache folder ... (Permission denied)" and ran with
+# texture compression off. The copy lives somewhere vpinos can write,
+# so the cache works normally -- without changing any permissions in
+# /opt and without affecting any other table. A copy, not a symlink:
+# not confirmed whether VPX resolves a symlink back to /opt when it
+# picks the cache folder. Refreshed (and its cache dropped) whenever
+# the vpinball package ships a newer one.
+launch_example_table() {
+    src=/opt/vpinball/assets/exampleTable.vpx
+    dir="$HOME/.local/share/vpinos/exampleTable"
+    mkdir -p "$dir"
+    if [ ! -e "$dir/exampleTable.vpx" ] || [ "$src" -nt "$dir/exampleTable.vpx" ]; then
+        if cp "$src" "$dir/exampleTable.vpx"; then
+            rm -rf "$dir/cache"
+        else
+            log "couldn't copy the example table, launching it from /opt"
+            dir=/opt/vpinball/assets
+        fi
+    fi
+    launch vpinball /opt/vpinball/VPinballX_BGFX -play "$dir/exampleTable.vpx"
+}
+
+# --- Main --------------------------------------------------------------
+
+action_vpinfe() {
+    log "selected top/vpinfe"
+    launch vpinfe /opt/vpinfe/vpinfe
+}
+
+# Runs straight in this tty, like VR > Setup -- no Hyprland needed, and
+# the apt output stays visible. The update may replace the menu itself
+# (vpinos-core), so the menus restart afterwards.
+action_update() {
+    log "selected top/update"
+    sudo /usr/libexec/vpinos/vpinos-update.sh
+    log "vpinos-update.sh exited $?"
+    pause
+}
+
+action_install() {
+    log "selected top/install-vpinos"
+    sudo /usr/bin/vpinos-launch installer /usr/bin/calamares
+    log "vpinos-launch exited $?"
+}
+
+action_shutdown() {
+    log "selected shutdown, confirmed"
+    sudo /usr/bin/systemctl poweroff
+}
+
+action_reboot() {
+    log "selected reboot, confirmed"
+    sudo /usr/bin/systemctl reboot
+}
+
+# --- Setup -------------------------------------------------------------
+
+action_vpinos_config() {
+    log "selected setup/vpinos-config"
+    launch vpinos-config /usr/bin/vpinos-config
+}
+
+# nmtui is a plain ncurses TUI (NetworkManager's own) -- no display
+# server needed, so it runs directly in this tty rather than through
+# vpinos-launch/Hyprland. Covers both Ethernet and Wi-Fi connections
+# (edit/activate), plus the system hostname. `sudo` (scoped in
+# /etc/sudoers.d/vpinos-core) because editing connections needs polkit
+# auth_admin_keep even for the active local session, and there's no
+# polkit agent here to satisfy that prompt -- root bypasses it entirely.
+action_network() {
+    log "selected setup/network-settings"
+    sudo nmtui
+    log "nmtui exited $?"
+}
+
+action_vpxconfig() {
+    log "selected setup/vpxconfig"
+    launch vpxconfig /usr/bin/vpxconfig --open-chrome
+}
+
+# --gamepadtest: vpinfe's own controller-mapping mode. Routed through
+# vpinos-launch the same as plain vpinfe -- still a real Wayland client
+# needing Hyprland up, just given an extra flag. Distinct client_name for
+# its own log lines; gets the normal fullscreen kiosk config, like vpinfe.
+action_vpinfe_map_controls() {
+    log "selected setup/vpinfe-map-controls"
+    launch vpinfe-gamepadtest /opt/vpinfe/vpinfe --gamepadtest
+}
+
+# Rotates the text console for a portrait-mounted Table screen (fbcon's
+# numbering: 0 normal, 3 90 Left, 1 90 Right). Separate from
+# vpinos-config's Table Screen Rotation, which only rotates what
+# Hyprland shows. fbcon applies at once (sudo'd helper, see
+# /etc/sudoers.d/vpinos-core) and on every boot after
+# (vpinos-console-rotation.service); kmscon on its restart. On a live
+# session the setting itself is lost on reboot, same as GPU Driver.
+action_set_console_rotation() {
+    case "$1" in
+        0|1|3) ;;
+        *) echo "usage: set-console-rotation 0|1|3" >&2; return 2 ;;
+    esac
+    echo "$1" > /etc/vpinos/console-rotation
+    sudo -n /usr/libexec/vpinos/vpinos-console-rotation.sh
+    log "console-rotation set to $1"
+    if on_kmscon; then
+        restart_console console-rotation
+    fi
+}
+
+# Switches which GPU kernel module is bound (see vpinos-gpu-driver.sh).
+# On kmscon the console restarts and the switch happens right away; on
+# fbcon it happens on the next graphical launch. Opt-in default
+# ("default": the open-source Mesa/NVK driver this image already ships
+# and uses everywhere else). Returns 3 when NVIDIA is refused.
+action_set_gpu_driver() {
+    case "$1" in
+        default)
+            echo "default" > /etc/vpinos/gpu-driver
+            log "gpu-driver set to default"
+            if on_kmscon; then
+                echo "Switching to the open-source driver now."
+                restart_console gpu-driver
+                return 0
+            fi
+            echo "Will use the open-source driver on the next launch."
+            ;;
+        nvidia)
+            # Secure Boot (kernel lockdown) rejects the unsigned,
+            # build-time-compiled nvidia module outright ("Key was
+            # rejected by service") -- a real report on a Dell
+            # laptop. Selecting it anyway left Hyprland forced onto
+            # nvidia's GBM/EGL with no nvidia driver loaded: a black
+            # screen that looked like a hard lockup.
+            if grep -qE '\[(integrity|confidentiality)\]' /sys/kernel/security/lockdown 2>/dev/null; then
+                log "gpu-driver nvidia refused -- Secure Boot lockdown active"
+                echo "Secure Boot is enabled, so the NVIDIA proprietary driver"
+                echo "can't load. Disable Secure Boot in your BIOS/UEFI setup"
+                echo "to use it. No change made."
+                return 3
+            fi
+            echo "nvidia" > /etc/vpinos/gpu-driver
+            log "gpu-driver set to nvidia"
+            if on_kmscon; then
+                echo "Switching to the NVIDIA proprietary driver now."
+                restart_console gpu-driver
+                return 0
+            fi
+            echo "Will use the NVIDIA proprietary driver on the next launch."
+            ;;
+        *) echo "usage: set-gpu-driver default|nvidia" >&2; return 2 ;;
+    esac
+}
+
+# The boot-on-startup programs: to add one, see the
+# `manage-boot-programs` skill in notes/skills/ -- this case, both
+# menus' Boot on startup lists, the matching case arm in
+# /etc/profile.d/vpinos-menu.sh, the audit check, and the docs together.
+action_set_boot_mode() {
+    case "$1" in
+        menu) msg="Will boot to the VPinOS menu on next startup." ;;
+        vpinfe) msg="Will boot straight to VPinFE on next startup." ;;
+        *) echo "usage: set-boot-mode menu|vpinfe" >&2; return 2 ;;
+    esac
+    echo "$1" > /etc/vpinos/boot-mode
+    log "boot-mode set to $1"
+    echo "$msg"
+}
+
+# --- Testing -----------------------------------------------------------
+
+action_example_table() {
+    log "selected testing/vpinball-example-table"
+    launch_example_table
+}
+
+action_testing_vpinfe() {
+    log "selected testing/vpinfe"
+    launch vpinfe /opt/vpinfe/vpinfe
+}
+
+# Live CD only -- lets you SSH in with a password instead of a key, for
+# debugging from a machine that hasn't got this cabinet's key set up.
+# Off by default; writes/removes a drop-in via
+# vpinos-ssh-password-auth.sh (sudo'd) rather than hand-editing
+# /etc/ssh/sshd_config directly -- see that script's own comment.
+action_set_ssh_password_auth() {
+    case "$1" in
+        on) msg="SSH password authentication enabled." ;;
+        off) msg="SSH password authentication disabled." ;;
+        *) echo "usage: set-ssh-password-auth on|off" >&2; return 2 ;;
+    esac
+    sudo /usr/libexec/vpinos/vpinos-ssh-password-auth.sh "$1"
+    log "ssh-password-auth set to $1"
+    echo "$msg"
+}
+
+# --- Tools -------------------------------------------------------------
+
+# Plain "sysinfo" client_name, not in vpinos-launch's windowed-config
+# case arm: a Tk GUI that manages its own fullscreen presentation.
+action_sysinfo() {
+    log "selected tools/sysinfo"
+    launch sysinfo /usr/libexec/vpinos/vpinos_sysinfo.py
+}
+
+# Not in the image (big, amd64-only -- see vpinos-vpx-editor-setup.sh),
+# so the first use offers to install it. Launched as vpinos-launch's
+# "x11" client: an Electron app that gets Xwayland's DISPLAY and a normal
+# floating window (the windowed Hyprland config), like the installer, so
+# it can be closed.
+action_vpx_editor() {
+    log "selected tools/vpx-editor"
+    if [ "$(dpkg --print-architecture)" != amd64 ]; then
+        echo "VPX Editor is only available for amd64 (this is $(dpkg --print-architecture))."
+        pause
+        return
+    fi
+    if ! vpx_editor_installed; then
+        echo "VPX Editor isn't installed (~530 MB download, needs internet)."
+        if ! is_installed; then
+            echo "Live USB: it will be lost on reboot."
+        fi
+        printf "Install it now? [y/N]: "
+        read -r confirm
+        case "$confirm" in
+            y|Y) ;;
+            *) return ;;
+        esac
+        # Runs straight in this tty, like VR > Setup -- no Hyprland
+        # needed, and the apt output stays visible.
+        sudo /usr/libexec/vpinos/vpinos-vpx-editor-setup.sh install
+        rc=$?
+        log "vpinos-vpx-editor-setup.sh exited $rc"
+        if [ "$rc" != 0 ]; then
+            pause
+            return
+        fi
+    fi
+    launch x11 /usr/bin/vpx-editor
+}
+
+# --- VR ----------------------------------------------------------------
+# WiVRn streaming to a standalone headset (e.g. a Quest 3), VPX rendering
+# through OpenXR. Nothing VR-specific ships in the image -- VR > Setup
+# installs it on demand (vpinos-vr-setup.sh); everything else is
+# vpinos-vr.sh. Start also turns VR on in VPX and Stop puts the previous
+# value back. See notes/vr-support.md.
+
+# Runs straight in this tty, like nmtui -- no Hyprland needed, and the
+# apt output stays visible.
+action_vr_install() {
+    log "selected vr/setup/install"
+    sudo /usr/libexec/vpinos/vpinos-vr-setup.sh install
+    log "vpinos-vr-setup.sh exited $?"
+    pause
+}
+
+action_vr_start() {
+    log "selected vr/start"
+    /usr/libexec/vpinos/vpinos-vr.sh start
+    /usr/libexec/vpinos/vpinos-vr.sh check
+    pause
+}
+
+action_vr_stop() {
+    log "selected vr/stop"
+    /usr/libexec/vpinos/vpinos-vr.sh stop
+    sleep 1
+}
+
+# Starts our own server first (GPU driver bound, VPX's VR setting on,
+# output in vpinos-wivrn.log) so the dashboard attaches to it over D-Bus
+# instead of starting a wivrn-server of its own -- one it starts itself
+# is its child and dies when the dashboard is closed.
+action_vr_dashboard() {
+    log "selected vr/wivrn-dashboard"
+    /usr/libexec/vpinos/vpinos-vr.sh start || { pause; return; }
+    launch wivrn-dashboard /usr/bin/wivrn-dashboard
+}
+
+action_vr_connect_usb() {
+    log "selected vr/connect-usb"
+    /usr/libexec/vpinos/vpinos-vr.sh connect-usb
+    pause
+}
+
+action_vr_pair() {
+    log "selected vr/pair"
+    /usr/libexec/vpinos/vpinos-vr.sh pair
+    pause
+}
+
+action_vr_example_table() {
+    log "selected vr/vpinball-example-table"
+    /usr/libexec/vpinos/vpinos-vr.sh start || { pause; return; }
+    if ! /usr/libexec/vpinos/vpinos-vr.sh check; then
+        printf "Launch anyway? [y/N]: "
+        read -r confirm
+        case "$confirm" in
+            y|Y) ;;
+            *) return ;;
+        esac
+    fi
+    # A USB headset gets connected automatically; one on Wi-Fi connects
+    # from the headset itself.
+    if [ "$(adb devices 2>/dev/null | awk 'NR > 1 && NF && $1 !~ /^\*/ { print $2; exit }')" = device ]; then
+        /usr/libexec/vpinos/vpinos-vr.sh connect-usb
+    fi
+    launch_example_table
+}
+
+# Ctrl+C has to stop tail, not the menu: a handler (not an ignore, which
+# tail would inherit) keeps the shell alive while tail still gets the
+# default SIGINT.
+action_vr_log() {
+    trap 'true' INT
+    /usr/libexec/vpinos/vpinos-vr.sh log
+    trap - INT
+}
+
+# ------------------------------------------------------------------------
+
+if [ -z "$VPINOS_MENU_LIB" ]; then
+    action=${1:?usage: vpinos-menu-actions <action> [arg]}
+    shift
+    fn=action_$(echo "$action" | tr - _)
+    if ! command -v "$fn" >/dev/null 2>&1; then
+        echo "vpinos-menu-actions: unknown action '$action'" >&2
+        exit 2
+    fi
+    "$fn" "$@"
+fi

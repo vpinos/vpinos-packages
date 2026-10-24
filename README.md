@@ -35,6 +35,7 @@ vpinos-platform/
 Dockerfile         trixie build image (debhelper, lintian, visudo)
 build.sh           builds vpinos-core into dist/
 build-platform.sh  builds vpinos-platform, vpinos-kernel and the NVIDIA modules into dist/
+tools/menu-dry-run runs the Textual vpinos-menu from this checkout, every item a dry run
 .github/workflows/
 ├── build.yml      every push/PR: build everything, upload the .debs as artifacts
 └── release.yml    on a core-vX.Y.Z or platform-vX.Y.Z tag: build and attach the .debs to a release

@@ -1,0 +1,39 @@
+#!/bin/sh
+# Runs the Textual vpinos-menu from this checkout, safely: every item
+# prints what it would do instead of doing it (no Hyprland, no sudo, no
+# settings written). For trying out the menu's look and navigation on a
+# development machine. Needs python3-textual (`sudo apt install
+# python3-textual` on trixie, the same version VPinOS installs).
+#
+#   tools/menu-dry-run
+#
+# The menu calls this same script as its actions (VPINOS_MENU_ACTIONS);
+# VPINOS_MENU_DRY_RUN tells the two roles apart. Settings "succeed" with
+# a message, except GPU Driver > NVIDIA, which is refused like on a
+# Secure Boot machine, to show that dialog. Update VPinOS exits and
+# re-execs the installed /usr/bin/vpinos-menu, not this checkout.
+
+if [ -z "$VPINOS_MENU_DRY_RUN" ]; then
+    here=$(dirname "$(realpath "$0")")
+    export VPINOS_MENU_DRY_RUN=1
+    VPINOS_MENU_ACTIONS=$(realpath "$0")
+    export VPINOS_MENU_ACTIONS
+    exec python3 -B "$here/../vpinos-core/src/usr/libexec/vpinos/vpinos_menu.py"
+fi
+
+case "$1" in
+    set-gpu-driver)
+        if [ "$2" = nvidia ]; then
+            echo "Secure Boot is enabled, so the NVIDIA proprietary driver"
+            echo "can't load. Disable Secure Boot in your BIOS/UEFI setup"
+            echo "to use it. No change made."
+            exit 3
+        fi
+        echo "(dry run) gpu-driver would be set to $2." ;;
+    set-*)
+        echo "(dry run) $1 $2" ;;
+    *)
+        echo "(dry run) the menu would run: vpinos-menu-actions $*"
+        printf "Press Enter to go back to the menu..."
+        read -r _ ;;
+esac
