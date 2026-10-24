@@ -10,13 +10,16 @@ Rules-Requires-Root: no
 Package: vpinos-core
 Architecture: all
 Depends: ${misc:Depends},
-         vpinos-platform,
+         vpinos-platform (>= 1.0.3),
          vpinos-kernel,
          vpinball,
          vpinfe,
          vpxconfig,
          hyprland,
          seatd,
+         kmscon,
+         fonts-dejavu-mono,
+         python3-textual,
          foot,
          python3,
          python3-tk,

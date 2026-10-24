@@ -1,3 +1,19 @@
+vpinos-core (1.1.12) trixie; urgency=medium
+
+  * The console the menu runs in is now kmscon instead of the kernel's
+    text console, so text is drawn with real fonts and full Unicode and
+    colour work. Takes effect at the next reboot after updating. If
+    kmscon can't start, the old console and menu come up instead.
+  * Console Rotation now applies to kmscon too: changing it restarts the
+    console, already rotated, without a reboot. On a multi-screen
+    cabinet the menu only shows on the largest screen.
+  * Changing the GPU Driver now switches straight away (the console
+    restarts) instead of on the next launch.
+  * Needs vpinos-platform 1.0.3, which adds kmscon to the backports
+    packages VPinOS follows.
+
+ -- Superhac <superhac007@gmail.com>  Sat, 24 Oct 2026 09:22:20 -0500
+
 vpinos-core (1.1.11) trixie; urgency=medium
 
   * Removed Setup > Audio Setup from the menu. The sound output is set in

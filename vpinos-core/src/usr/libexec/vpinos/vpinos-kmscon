@@ -1,0 +1,36 @@
+#!/bin/sh
+# Runs kmscon on tty1 in place of agetty -- the console vpinos-menu runs
+# in. kmscon draws with real fonts through DRM, so full UTF-8 and
+# truecolor work there, which the kernel's fbcon can't do. Started as
+# root by kmsconvt@tty1.service (see its vpinos.conf drop-in, which
+# also switches the GPU driver just before this starts).
+#
+# Console Rotation: the same /etc/vpinos/console-rotation setting fbcon
+# uses, in fbcon's numbering (see vpinos-console-rotation.sh),
+# translated to kmscon's names. kmscon only reads it at startup, so
+# vpinos-menu restarts this unit after a change
+# (vpinos-console-restart.sh). It rotates every screen kmscon draws on,
+# so --multi-monitor=largest keeps the menu on the largest screen only
+# (normally the Table) instead of sideways on the backglass and DMD too.
+#
+# --grab-rotate-*= (empty disables a grab; 10.0.3 has no --no-grab-*):
+# kmscon's Super+Plus/Minus would otherwise rotate the console live,
+# unsaved -- reachable from a cabinet's encoder. --session-max=1: a
+# second login session would mean a second menu.
+#
+# Autologin as `vpinos`, live and installed, like getty@tty1's
+# autologin.conf drop-in -- which still applies when kmscon fails and
+# the unit falls back to getty@tty1 (OnFailure=).
+set -e
+
+tty=${1:?usage: vpinos-kmscon <tty>}
+
+case "$(cat /etc/vpinos/console-rotation 2>/dev/null)" in
+    1) rotate=right ;;
+    3) rotate=left ;;
+    *) rotate=normal ;;
+esac
+
+exec /usr/bin/kmscon --vt="$tty" --no-switchvt --rotate="$rotate" \
+    --multi-monitor=largest --grab-rotate-cw= --grab-rotate-ccw= \
+    --session-max=1 --login -- /bin/login -p -f vpinos

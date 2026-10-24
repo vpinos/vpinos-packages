@@ -69,6 +69,23 @@ case "$1" in
             echo "vpinos-core: no 'vpinos' user -- skipping the cabinet defaults that belong to it" >&2
         fi
 
+        # tty1's console is kmscon (/usr/libexec/vpinos/vpinos-kmscon),
+        # not agetty: getty.target starts kmsconvt@tty1 instead of
+        # getty@tty1. The getty@tty1 drop-ins (ours and live-config's)
+        # stay -- getty@tty1 is still kmsconvt@'s OnFailure= fallback.
+        # Plain symlinks, the same ones `systemctl enable/disable` would
+        # write, so this also works in the image build's chroot. Other
+        # VTs keep agetty: each kmscon would hold the GPU open.
+        # On a running cabinet the switch happens at the next boot -- the
+        # menu's "A reboot is needed" after Update VPinOS says so.
+        wants=/etc/systemd/system/getty.target.wants
+        mkdir -p "$wants"
+        if [ ! -e "$wants/kmsconvt@tty1.service" ] && [ -d /run/systemd/system ]; then
+            touch /run/reboot-required 2>/dev/null || true
+        fi
+        rm -f "$wants/getty@tty1.service"
+        ln -sf /usr/lib/systemd/system/kmsconvt@.service "$wants/kmsconvt@tty1.service"
+
         # Pick up the getty/ssh drop-ins without a reboot.
         if [ -d /run/systemd/system ]; then
             systemctl daemon-reload || true

@@ -54,3 +54,11 @@ Pin-Priority: 900
 Package: src:hyprland src:libxkbcommon
 Pin: origin snapshot.debian.org
 Pin-Priority: 900
+
+# kmscon (tty1's console, replacing agetty on fbcon -- see vpinos-core's
+# vpinos-kmscon) is backports-only too, and needs a newer libtsm4 than
+# trixie ships (>= 4.7.1; trixie has 4.0.2) -- the same backports-only-
+# dependency situation as libxkbcommon above, so both are pinned.
+Package: src:kmscon src:libtsm
+Pin: origin snapshot.debian.org
+Pin-Priority: 900

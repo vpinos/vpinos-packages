@@ -18,6 +18,9 @@
 # Unicode-capable console font and the right locale/encoding -- plain
 # ASCII borders were tried too and still didn't come out right on a
 # real boot. Back to plain POSIX sh/echo, which has no such dependency.
+# tty1's console is now kmscon (/usr/libexec/vpinos/vpinos-kmscon), with
+# full UTF-8 and truecolor, so that no longer applies there -- but this
+# menu is still what runs on the fbcon fallback (getty@tty1).
 
 # VPXConfig and vpinos-config (cabinet configuration -- monitor
 # roles/refresh rates, VPinball Mode, Rendering Options, Cabinet
@@ -231,6 +234,11 @@ gpu_driver_submenu() {
             1)
                 echo "default" > /etc/vpinos/gpu-driver
                 echo "$(date -Is): menu: gpu-driver set to default" >>/var/log/vpinos-menu.log
+                if on_kmscon; then
+                    echo "Switching to the open-source driver now."
+                    restart_console gpu-driver
+                    return
+                fi
                 echo "Will use the open-source driver on the next launch."
                 sleep 2
                 return
@@ -253,6 +261,11 @@ gpu_driver_submenu() {
                 fi
                 echo "nvidia" > /etc/vpinos/gpu-driver
                 echo "$(date -Is): menu: gpu-driver set to nvidia" >>/var/log/vpinos-menu.log
+                if on_kmscon; then
+                    echo "Switching to the NVIDIA proprietary driver now."
+                    restart_console gpu-driver
+                    return
+                fi
                 echo "Will use the NVIDIA proprietary driver on the next launch."
                 sleep 2
                 return
@@ -266,6 +279,27 @@ gpu_driver_submenu() {
                 ;;
         esac
     done
+}
+
+# Whether this menu is running in kmscon (tty1's console, see
+# /usr/libexec/vpinos/vpinos-kmscon) rather than on fbcon (the
+# getty@tty1 fallback) or over SSH.
+on_kmscon() {
+    [ "$TERM" = kmscon ] && [ -z "$SSH_CONNECTION" ]
+}
+
+# On kmscon, Console Rotation and GPU Driver only take effect when the
+# console restarts: kmscon reads its rotation at startup, and it holds
+# the GPU open, so the driver switch runs just before it starts. The
+# restart ends this session; autologin brings the menu straight back,
+# so the sleep is only there until it does. On fbcon nothing restarts:
+# the rotation already applied, and the driver switches at the next
+# launch, as before.
+restart_console() {
+    echo "Restarting the console..."
+    echo "$(date -Is): menu: restarting the console ($1)" >>/var/log/vpinos-menu.log
+    sudo -n /usr/libexec/vpinos/vpinos-console-restart.sh
+    sleep 10
 }
 
 # Display name for /etc/vpinos/console-rotation's value (fbcon's own
@@ -313,6 +347,7 @@ console_rotation_submenu() {
         echo "$value" > /etc/vpinos/console-rotation
         sudo -n /usr/libexec/vpinos/vpinos-console-rotation.sh
         echo "$(date -Is): menu: console-rotation set to $value" >>/var/log/vpinos-menu.log
+        on_kmscon && restart_console console-rotation
         return
     done
 }

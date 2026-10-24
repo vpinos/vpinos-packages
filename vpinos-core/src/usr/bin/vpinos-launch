@@ -39,6 +39,19 @@ set -e
 client_name="${1:?usage: vpinos-launch <name> <command> [args...]}"
 shift
 
+# On kmscon (tty1's console, see /usr/libexec/vpinos/vpinos-kmscon), the
+# console holds DRM master while it's on screen, so Hyprland can't take
+# the display. kmscon's own kmscon-launch-gui asks it to step back,
+# runs the command, and gives the screen back to the console once it
+# exits -- so this script re-runs itself under it, once
+# (VPINOS_KMSCON_GUI marks the inner run). On the getty@tty1 fallback
+# (fbcon) and over SSH, TERM isn't kmscon and nothing changes. sudo
+# keeps TERM, so the installer's `sudo vpinos-launch` is covered too.
+if [ "$TERM" = kmscon ] && [ -z "$SSH_CONNECTION" ] && [ -z "$VPINOS_KMSCON_GUI" ]; then
+    export VPINOS_KMSCON_GUI=1
+    exec /usr/bin/kmscon-launch-gui "$0" "$client_name" "$@"
+fi
+
 # /run/user/<uid> rather than a custom root-owned path: for the normal
 # (non-installer) case this runs as `vpinos`, a real PAM-logged-in
 # user, whose /run/user/1000 already exists (pam_systemd) with correct

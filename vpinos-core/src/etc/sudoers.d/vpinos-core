@@ -51,6 +51,12 @@
 # reasoning as every other rule here.
 %sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-console-rotation.sh
 
+# vpinos-menu's Console Rotation and GPU Driver options, on kmscon --
+# restarting kmsconvt@tty1.service needs root. Scoped to this one
+# dedicated script, which takes no arguments and only restarts that one
+# unit, same narrow-scope reasoning as every other rule here.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-console-restart.sh
+
 # vpinos-menu's Testing submenu's "SSH Password Authentication" option
 # (live CD only) -- writing an sshd_config.d drop-in and restarting
 # ssh.service both need root. Scoped to this one dedicated script, same
