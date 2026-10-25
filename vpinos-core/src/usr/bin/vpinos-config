@@ -765,9 +765,9 @@ def save_vpinfe_settings(role_to_monitor, id_by_monitor):
 # Devices, their profiles and the sinks come from vpinos-audio-enum.sh,
 # the same listing as System Info's Sound section.
 # PipeWire's ids only last until a restart, so they're never written
-# anywhere by this tool: wpctl hands the choice to WirePlumber, which
-# saves it under ~/.local/state/wireplumber by name and restores it at
-# login.
+# anywhere by this tool: WirePlumber saves the choice under
+# ~/.local/state/wireplumber by name (default-profile, default-nodes)
+# and restores it at login.
 AUDIO_ENUM = "/usr/libexec/vpinos/vpinos-audio-enum.sh"
 AUDIO_DEVICE_RE = re.compile(r"^Device ID: (\d+)\s+\((.*)\)$")
 AUDIO_PROFILE_RE = re.compile(r"^([* ]) ID: (\d+)\s+Profile: (\S+)\s*(.*?)\s*$")
@@ -863,11 +863,17 @@ def apply_audio(device_id, profile_id):
     changing = dev["active"] != profile_id
     before = set(device_sinks(audio["sinks"]))
     if changing:
+        # pactl, not wpctl: WirePlumber only stores a profile set with
+        # save=true, which pipewire-pulse sends and wpctl set-profile
+        # (0.5.8) doesn't. Without it the card goes back to WirePlumber's
+        # own pick at the next login, and the default sink's saved name,
+        # which comes from the profile, no longer exists. pipewire-pulse's
+        # card index is the PipeWire id.
         proc = subprocess.run(
-            ["wpctl", "set-profile", str(device_id), str(profile_id)], capture_output=True, text=True, check=False
+            ["pactl", "set-card-profile", str(device_id), profile["name"]], capture_output=True, text=True, check=False
         )
         if proc.returncode != 0:
-            raise RuntimeError(proc.stderr.strip() or "wpctl set-profile failed")
+            raise RuntimeError(proc.stderr.strip() or "pactl set-card-profile failed")
 
     # The new profile's sink replaces the old one a moment after
     # set-profile returns -- until the list changes, a sink still there

@@ -1,3 +1,13 @@
+vpinos-core (1.1.14) trixie; urgency=medium
+
+  * VPinOS Configuration: the sound output profile picked under Sound
+    Output is now remembered after a reboot. Before, the sound switched
+    straight away but went back to the default at the next login, and
+    the page showed the default again. Pick your sound output once more
+    after updating.
+
+ -- Superhac <superhac007@gmail.com>  Sun, 25 Oct 2026 17:12:21 -0500
+
 vpinos-core (1.1.13) trixie; urgency=medium
 
   * New menu: the VPinOS menu is now a full-screen menu with the logo,
