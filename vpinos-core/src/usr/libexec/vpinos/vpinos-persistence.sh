@@ -174,6 +174,18 @@ setup() {
         set_status off "Not saving settings: this isn't a USB stick written from the ISO (DVD, virtual machine or Ventoy)."
         return 0
     fi
+    # Written from the ISO, the image is mounted as iso9660. Rufus's
+    # default ISO Image mode (and other file-copy tools) formats the
+    # stick as one FAT/exFAT/NTFS partition filling it and copies the
+    # files in instead: no free space, and live-boot never keeps
+    # persistence on the partition it boots from. Seen on a real stick
+    # (Rufus, one FAT32 partition "DEBIAN TRIX").
+    case "$(findmnt -no FSTYPE /run/live/medium 2>/dev/null)" in
+        vfat|exfat|ntfs|ntfs3|fuseblk)
+            set_status off "Not saving settings: this USB stick was written in ISO (file-copy) mode, Rufus's default. Write the ISO again in DD mode (Rufus's \"DD Image\" mode, balenaEtcher, or dd) to save settings."
+            return 0
+            ;;
+    esac
     if [ "$(lsblk -dno RO "$disk")" != 0 ]; then
         set_status off "Not saving settings: the USB stick is write-protected."
         return 0

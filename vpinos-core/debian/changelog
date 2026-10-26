@@ -1,3 +1,13 @@
+vpinos-core (1.1.16) trixie; urgency=medium
+
+  * Live USB: when settings can't be saved because the USB stick was
+    written in ISO (file-copy) mode -- Rufus's default -- the main menu
+    and System Info now say so, and to write the ISO again in DD mode
+    (Rufus's "DD Image" mode, balenaEtcher, or dd). Before, they only
+    said the stick wasn't laid out as expected.
+
+ -- Superhac <superhac007@gmail.com>  Mon, 26 Oct 2026 08:11:07 -0500
+
 vpinos-core (1.1.15) trixie; urgency=medium
 
   * Live USB: settings can now be saved on the USB stick. Pick the
