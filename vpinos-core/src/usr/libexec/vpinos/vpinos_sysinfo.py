@@ -123,6 +123,23 @@ def vpinos_section():
             session = "Live (booted from USB/ISO)" if "boot=live" in f.read() else "Installed"
     except OSError:
         session = "unknown"
+    # On a live session, whether its settings are saved to the USB stick
+    # (vpinos-persistence.sh), and if not why, when the "save settings
+    # to USB" boot entry was picked.
+    if session.startswith("Live"):
+        try:
+            state, message = (subprocess.run(
+                ["/usr/libexec/vpinos/vpinos-persistence.sh", "status"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.splitlines() + ["", ""])[:2]
+        except (OSError, subprocess.SubprocessError):
+            state, message = "", ""
+        if state == "saving":
+            session = "Live (settings saved to USB)"
+        elif state == "other":
+            session = "Live (settings saved by Rufus/Ventoy persistence)"
+        elif state in ("off", "failed"):
+            session = f"Live ({message})"
     # The VPinOS version is vpinos-core's: it moves with every update,
     # while /etc/os-release only names the ISO the cabinet was installed
     # from (see notes/vpinos-core-update-plan.md).

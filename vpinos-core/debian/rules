@@ -14,8 +14,11 @@ override_dh_auto_install:
 # shipped but deliberately NOT enabled -- the sample tables are bundled
 # into the ISO (0105-bundle-sample-tables.hook.chroot); enabling it is a
 # one-line change if they ever go back to download-on-boot.
+# vpinos-persistence.service only does anything on a live boot with
+# "save settings to USB" picked (see its own comment).
 override_dh_installsystemd:
 	dh_installsystemd --no-start vpinos-hosts.service
+	dh_installsystemd --no-start vpinos-persistence.service
 	dh_installsystemd --no-start vpinos-console-rotation.service
 	dh_installsystemd --no-enable --no-start vpinos-fetch-tables.service
 

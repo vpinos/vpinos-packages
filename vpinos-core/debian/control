@@ -26,7 +26,9 @@ Depends: ${misc:Depends},
          network-manager,
          curl,
          sudo,
-         pciutils
+         pciutils,
+         fdisk,
+         e2fsprogs
 Description: VPinOS cabinet customizations
  The parts of VPinOS that make a Debian system a pinball cabinet: the
  console menu (vpinos-menu), the Hyprland kiosk launcher (vpinos-launch),

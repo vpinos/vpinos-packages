@@ -81,3 +81,10 @@
 # dedicated script, which only ever installs the vpx-editor package,
 # same narrow-scope reasoning as every other rule above.
 %sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-vpx-editor-setup.sh
+
+# vpinos-menu's Tools > "Reset Saved Settings" option (live USB with
+# saved settings only) -- removing the saved-settings partition's
+# persistence.conf needs root. Scoped to this one script's reset, which
+# only touches the partition vpinos-persistence.service set up, same
+# narrow-scope reasoning as every other rule above.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-persistence.sh reset

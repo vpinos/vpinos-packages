@@ -219,7 +219,7 @@ setup_submenu() {
         echo "4) Network Settings"
         echo "5) VPXConfig (Advanced VPinball Configuration)"
         echo "6) VPinFE Map Controls"
-        if is_installed; then
+        if settings_kept; then
             bcur=$(cat /etc/vpinos/boot-mode 2>/dev/null)
             [ -z "$bcur" ] && bcur=menu
             echo "7) Boot on startup: $bcur"
@@ -234,7 +234,7 @@ setup_submenu() {
             4) action_network ;;
             5) action_vpxconfig ;;
             6) action_vpinfe_map_controls ;;
-            7) if is_installed; then boot_mode_submenu; else invalid; fi ;;
+            7) if settings_kept; then boot_mode_submenu; else invalid; fi ;;
             q|Q) return ;;
             *) invalid ;;
         esac
@@ -316,12 +316,27 @@ tools_submenu() {
         fi
         echo "1) System Info (Debug)"
         echo "2) VPX Editor$estate"
+        if [ "$(persistence_state)" = saving ]; then
+            saved=1
+            echo "3) Reset Saved Settings"
+        else
+            saved=0
+        fi
         echo "q) Back"
         echo "=============================="
         choose
         case "$choice" in
             1) action_sysinfo ;;
             2) action_vpx_editor ;;
+            3)
+                if [ "$saved" = 0 ]; then
+                    invalid
+                elif confirm "Clear all saved settings on this USB stick and reboot?"; then
+                    action_reset_saved_settings
+                else
+                    log "selected tools/reset-saved-settings, cancelled"
+                fi
+                ;;
             q|Q) return ;;
             *) invalid ;;
         esac
@@ -413,6 +428,18 @@ vr_submenu() {
     done
 }
 
+# On a live session, whether its settings survive a reboot.
+live_settings_note() {
+    case "$(persistence_state)" in
+        none)
+            echo "Settings are lost on reboot. To keep them, pick"
+            echo "\"save settings to USB\" at the boot menu."
+            ;;
+        *) persistence_message ;;
+    esac
+    echo
+}
+
 confirm() {
     printf "%s [y/N]: " "$1"
     read -r answer
@@ -427,6 +454,9 @@ while true; do
     print_logo
     echo "            Main"
     echo "=============================="
+    if ! is_installed; then
+        live_settings_note
+    fi
     echo "1) Setup"
     if is_installed; then
         echo "2) VPinFE"

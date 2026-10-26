@@ -1,3 +1,23 @@
+vpinos-core (1.1.15) trixie; urgency=medium
+
+  * Live USB: settings can now be saved on the USB stick. Pick the
+    "save settings to USB" entry at the boot menu (VPinOS 1.1.5 ISO or
+    newer). The first time, VPinOS makes a partition in the free space
+    after the image -- all of it, if there's at least 1 GB -- and from
+    then on your VPinOS Configuration, VPinball and VPinFE settings,
+    tables, Wi-Fi and Boot on startup are kept. Pick the same entry
+    every time; the normal entry starts without them.
+  * The main menu on a live session says whether settings are being
+    saved, and System Info shows it under Session.
+  * Setup > Boot on startup is also offered on a live USB that saves its
+    settings.
+  * New: Tools > Reset Saved Settings (live USB with saved settings)
+    clears them and reboots.
+  * Not saved: anything installed (VR components, VPX Editor, updates).
+    Writing the ISO to the stick again removes the saved settings.
+
+ -- Superhac <superhac007@gmail.com>  Mon, 26 Oct 2026 06:57:17 -0500
+
 vpinos-core (1.1.14) trixie; urgency=medium
 
   * VPinOS Configuration: the sound output profile picked under Sound

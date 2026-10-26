@@ -37,15 +37,40 @@ log() {
     echo "$(date -Is): menu: $*" >>/var/log/vpinos-menu.log
 }
 
-# /etc/vpinos/boot-mode is what /etc/profile.d/vpinos-menu.sh reads at
-# login to decide what to auto-launch before falling through to the
-# menu. Changing it only makes sense on an INSTALLED system -- a live
-# session never persists it across a reboot, and boot=live on the kernel
-# cmdline is the same mechanism live-config itself already uses to tell
-# the two apart (see notes/vpinos.md step 5). "Boot on startup" simply
-# doesn't exist on a live session -- not shown, not selectable.
+# boot=live on the kernel cmdline is the same mechanism live-config
+# itself already uses to tell live and installed apart (see
+# notes/vpinos.md step 5).
 is_installed() {
     ! grep -q 'boot=live' /proc/cmdline 2>/dev/null
+}
+
+# A live session whose settings survive a reboot: the "save settings to
+# USB" boot entry (vpinos-persistence.sh), or Rufus's or Ventoy's own
+# persistence -- live-boot mounts any of them under
+# /run/live/persistence/.
+is_persistent() {
+    grep -q ' /run/live/persistence/' /proc/mounts 2>/dev/null
+}
+
+# /etc/vpinos/boot-mode is what /etc/profile.d/vpinos-menu.sh reads at
+# login to decide what to auto-launch before falling through to the
+# menu. Changing it only makes sense where it survives a reboot: an
+# installed system, or a live session that saves its settings. On a
+# plain live session "Boot on startup" simply doesn't exist -- not
+# shown, not selectable.
+settings_kept() {
+    is_installed || is_persistent
+}
+
+# The saved-settings state (vpinos-persistence.sh status): the first
+# line is saving, other, off, failed or none (not the "save settings"
+# boot entry); the second the sentence the menus show.
+persistence_state() {
+    /usr/libexec/vpinos/vpinos-persistence.sh status 2>/dev/null | sed -n 1p
+}
+
+persistence_message() {
+    /usr/libexec/vpinos/vpinos-persistence.sh status 2>/dev/null | sed -n 2p
 }
 
 # Whether the menu is running in kmscon (tty1's console, see
@@ -188,7 +213,8 @@ action_vpinfe_map_controls() {
 # Hyprland shows. fbcon applies at once (sudo'd helper, see
 # /etc/sudoers.d/vpinos-core) and on every boot after
 # (vpinos-console-rotation.service); kmscon on its restart. On a live
-# session the setting itself is lost on reboot, same as GPU Driver.
+# session the setting itself is lost on reboot, same as GPU Driver,
+# unless it saves its settings (vpinos-persistence.sh).
 action_set_console_rotation() {
     case "$1" in
         0|1|3) ;;
@@ -332,6 +358,21 @@ action_vpx_editor() {
         fi
     fi
     launch x11 /usr/bin/vpx-editor
+}
+
+# Live USB with saved settings only. Clears them and reboots: the next
+# boot with "save settings to USB" starts from scratch (see
+# vpinos-persistence.sh's reset). Asked first, by the menus.
+action_reset_saved_settings() {
+    log "selected tools/reset-saved-settings, confirmed"
+    if ! sudo /usr/libexec/vpinos/vpinos-persistence.sh reset; then
+        pause
+        return
+    fi
+    log "saved settings cleared, rebooting"
+    echo "Saved settings cleared. Rebooting..."
+    sleep 2
+    sudo /usr/bin/systemctl reboot
 }
 
 # --- VR ----------------------------------------------------------------

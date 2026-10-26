@@ -82,11 +82,30 @@ def is_installed() -> bool:
     return "boot=live" not in read("/proc/cmdline")
 
 
+def is_persistent() -> bool:
+    """A live session whose settings survive a reboot, the same test as
+    the actions' is_persistent."""
+    return " /run/live/persistence/" in read("/proc/mounts")
+
+
+def settings_kept() -> bool:
+    """Where Boot on startup means something (the actions' settings_kept)."""
+    return is_installed() or is_persistent()
+
+
 def output(*cmd: str) -> str:
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+def persistence() -> tuple[str, str]:
+    """vpinos-persistence.sh status: the state (saving, other, off,
+    failed, or none without the "save settings" boot entry) and the
+    sentence to show."""
+    lines = output("/usr/libexec/vpinos/vpinos-persistence.sh", "status").splitlines()
+    return (lines[0] if lines else "none", lines[1] if len(lines) > 1 else "")
 
 
 def gpu_driver() -> str:
@@ -472,21 +491,36 @@ class MainScreen(MenuScreen):
         ]
         return items
 
+    def info(self) -> str:
+        """On a live session, whether its settings survive a reboot."""
+        if is_installed():
+            return ""
+        state, message = persistence()
+        if state == "none":
+            return 'Settings are lost on reboot. To keep them, pick "save settings to USB" at the boot menu.'
+        return message
+
     def quit(self) -> None:
         self.app.exit()
 
     def confirm(self, question: str, action: str) -> Callable[[], None]:
-        def ask() -> None:
-            def answered(yes: Optional[bool]) -> None:
-                if yes:
-                    self.app.run_action_in_terminal((action,))
-                else:
-                    log(f"selected {action}, cancelled")
-            self.app.push_screen(ConfirmScreen(question), answered)
-        return ask
+        return confirm(self, question, action, action)
 
     def action_back(self) -> None:
         pass
+
+
+def confirm(screen: MenuScreen, question: str, action: str, name: str) -> Callable[[], None]:
+    """Asks first, then runs the action in the terminal. A No is logged
+    as "selected <name>, cancelled", the action itself logs a Yes."""
+    def ask() -> None:
+        def answered(yes: Optional[bool]) -> None:
+            if yes:
+                screen.app.run_action_in_terminal((action,))
+            else:
+                log(f"selected {name}, cancelled")
+        screen.app.push_screen(ConfirmScreen(question), answered)
+    return ask
 
 
 class SetupScreen(MenuScreen):
@@ -508,7 +542,7 @@ class SetupScreen(MenuScreen):
             Item("6", "VPinFE Map Controls", self.terminal("vpinfe-map-controls"),
                  help="Map your buttons and controller in VPinFE."),
         ]
-        if is_installed():
+        if settings_kept():
             items.append(Item("7", "Boot on startup", self.open(BootModeScreen), value=boot_mode(),
                               help="What starts when the cabinet is switched on."))
         return items + [SEPARATOR, self.back_item()]
@@ -587,14 +621,18 @@ class ToolsScreen(MenuScreen):
     title_text = "Tools"
 
     def items(self) -> list[Optional[Item]]:
-        return [
+        items: list[Optional[Item]] = [
             Item("1", "System Info (Debug)", self.terminal("sysinfo"),
                  help="Hardware, drivers, screens and sound devices."),
             Item("2", "VPX Editor", self.terminal("vpx-editor"), value=vpx_editor_state(),
                  help="Edit tables (installs on first use, ~530 MB)."),
-            SEPARATOR,
-            self.back_item(),
         ]
+        if persistence()[0] == "saving":
+            items.append(Item("3", "Reset Saved Settings",
+                              confirm(self, "Clear all saved settings on this USB stick and reboot?",
+                                      "reset-saved-settings", "tools/reset-saved-settings"),
+                              help="Start fresh: clears what's saved on this USB stick, then reboots."))
+        return items + [SEPARATOR, self.back_item()]
 
 
 class VrScreen(MenuScreen):
