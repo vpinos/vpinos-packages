@@ -1,3 +1,12 @@
+vpinos-core (1.1.17) trixie; urgency=medium
+
+  * Boot on startup: VPinFE now shows up when it starts at boot. On some
+    cabinets (three screens, 4K table) the console kept the table screen
+    and the other screens stayed black, although VPinFE was running.
+    Starting VPinFE from the menu was not affected.
+
+ -- Superhac <superhac007@gmail.com>  Tue, 27 Oct 2026 16:10:31 -0500
+
 vpinos-core (1.1.16) trixie; urgency=medium
 
   * Live USB: when settings can't be saved because the USB stick was

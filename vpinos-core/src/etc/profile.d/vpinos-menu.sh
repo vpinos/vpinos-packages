@@ -33,7 +33,19 @@ if [ -z "$SSH_CONNECTION" ] && [ -t 0 ]; then
     # this case arm, the matching submenu entry in vpinos-menu, the
     # audit check, and the docs together, so they can't drift out of
     # sync with each other.
-    case "$(cat /etc/vpinos/boot-mode 2>/dev/null)" in
+    boot_mode=$(cat /etc/vpinos/boot-mode 2>/dev/null)
+    # kmscon has only just started when this runs at boot, and is still
+    # bringing up the screens. kmscon-launch-gui gives it a fixed 0.2s to
+    # let go of the display before Hyprland starts, which isn't enough
+    # then: on a three-screen cabinet (4K table) kmscon kept the table
+    # screen and the other two stayed black, while VPinFE ran normally
+    # behind them. Launching the same thing from the menu later always
+    # worked. Confirmed fixed on that cabinet by waiting 3s first.
+    case "$boot_mode" in
+        menu | "") ;;
+        *) [ "$TERM" = kmscon ] && sleep 3 ;;
+    esac
+    case "$boot_mode" in
         vpinfe)
             /usr/bin/vpinos-launch vpinfe /opt/vpinfe/vpinfe
             ;;
@@ -43,7 +55,7 @@ if [ -z "$SSH_CONNECTION" ] && [ -t 0 ]; then
             # Unrecognized value (corrupted file, or a mode a newer
             # vpinos-menu wrote that this older profile script doesn't
             # know yet) -- fail safe to just the menu, don't guess.
-            echo "$(date -Is): profile: unknown boot-mode '$(cat /etc/vpinos/boot-mode 2>/dev/null)', falling back to menu" >>/var/log/vpinos-menu.log
+            echo "$(date -Is): profile: unknown boot-mode '$boot_mode', falling back to menu" >>/var/log/vpinos-menu.log
             ;;
     esac
     vpinos-menu
