@@ -1,0 +1,24 @@
+# Opens every USB device, USB serial port and hidraw node to the plugdev
+# group, so DOF (and other cabinet hardware vpinball talks to directly:
+# FTDI/CH340 boards, Pinscape/KL25Z, Teensy, Arduino bootloaders) works
+# as `vpinos` without per-board rules. `vpinos` is already in plugdev.
+# uaccess only matters on a logind seat (desktop installs); the cabinet
+# runs under seatd, where the group is what grants access.
+#
+# ID_MM_DEVICE_IGNORE keeps ModemManager from probing serial boards with
+# AT commands -- it grabs the port for a few seconds after plug-in and can
+# confuse DOF controllers. vpinos-core's postinst masks ModemManager
+# anyway; this covers a cabinet where someone unmasked it. Must sort
+# before ModemManager's 77-mm-* rules and before 73-seat-late.rules
+# (uaccess).
+#
+# A local override goes in /etc/udev/rules.d/70-vpinos-usb-open.rules.
+
+# Every USB serial / CDC-ACM port
+SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*|ttyACM[0-9]*", MODE="0660", GROUP="plugdev", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# Raw USB access to every USB device (libusb, libftdi, bootloaders, etc.)
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", MODE="0660", GROUP="plugdev", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# Every HID raw device (Teensy rawhid/loader, other HID-protocol boards)
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", MODE="0660", GROUP="plugdev", TAG+="uaccess"

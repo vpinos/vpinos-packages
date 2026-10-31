@@ -86,9 +86,35 @@ case "$1" in
         rm -f "$wants/getty@tty1.service"
         ln -sf /usr/lib/systemd/system/kmsconvt@.service "$wants/kmsconvt@tty1.service"
 
-        # Pick up the getty/ssh drop-ins without a reboot.
+        # ModemManager (pulled in by network-manager's Recommends) is
+        # only for cellular modems, which a cabinet never has, and it
+        # probes USB serial boards (DOF controllers) with AT commands.
+        # Masked rather than removed: `apt upgrade` can't remove a
+        # package. Once, ever (stamped like seed), so a `systemctl
+        # unmask` survives later upgrades. The plain symlink is what
+        # `systemctl mask` writes, so this also works in the chroot.
+        if [ ! -e "$STAMPS/modemmanager-masked" ]; then
+            if [ -d /run/systemd/system ]; then
+                systemctl stop ModemManager.service 2>/dev/null || true
+            fi
+            ln -sf /dev/null /etc/systemd/system/ModemManager.service
+            mkdir -p "$STAMPS"
+            touch "$STAMPS/modemmanager-masked"
+        fi
+
+        # Pick up the getty/ssh drop-ins and the ModemManager mask
+        # without a reboot.
         if [ -d /run/systemd/system ]; then
             systemctl daemon-reload || true
+        fi
+
+        # Apply 70-vpinos-usb-open.rules to boards that are already
+        # plugged in. Skipped in the image build's chroot (no running
+        # udev).
+        if [ -S /run/udev/control ]; then
+            udevadm control --reload-rules || true
+            udevadm trigger --subsystem-match=usb --subsystem-match=tty \
+                --subsystem-match=hidraw || true
         fi
         ;;
 esac
