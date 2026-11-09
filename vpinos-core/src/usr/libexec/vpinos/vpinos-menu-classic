@@ -398,7 +398,7 @@ vr_submenu() {
         echo "3) Stop VR server"
         echo "4) WiVRn Dashboard"
         echo "5) Connect headset over USB"
-        echo "6) Pair new headset (Wi-Fi)"
+        echo "6) Pair new headset"
         echo "7) Launch VPinball Example Table"
         echo "8) Show server log"
         echo "q) Back"

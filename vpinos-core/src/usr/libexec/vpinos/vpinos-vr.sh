@@ -255,7 +255,7 @@ connect_usb() {
     echo "WiVRn app started on the headset."
 }
 
-# A new headset on Wi-Fi has to be paired once; the PIN it asks for is
+# A new headset (USB or Wi-Fi) has to be paired once; the PIN it asks for is
 # printed in the server's log (already-paired headsets live in
 # ~/.config/wivrn/known_keys.json).
 pair() {

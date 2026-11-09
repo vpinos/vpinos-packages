@@ -651,7 +651,7 @@ class VrScreen(MenuScreen):
             Item("3", "Stop VR server", self.vr("vr-stop"), help="Stop WiVRn and put VPinball's VR setting back."),
             Item("4", "WiVRn Dashboard", self.vr("vr-dashboard"), help="WiVRn's own settings window."),
             Item("5", "Connect headset over USB", self.vr("vr-connect-usb"), help="Use a headset plugged in by USB."),
-            Item("6", "Pair new headset (Wi-Fi)", self.vr("vr-pair"), help="Pair a headset on the same network."),
+            Item("6", "Pair new headset", self.vr("vr-pair"), help="Pair a new headset (USB or Wi-Fi) with a PIN."),
             Item("7", "Launch VPinball Example Table", self.vr("vr-example-table"),
                  help="Play the example table in the headset."),
             Item("8", "Show server log", self.vr("vr-log"), help="Follow the WiVRn log (Ctrl+C to stop)."),
@@ -817,6 +817,11 @@ class VpinosMenu(App):
             # The update may have replaced this menu (vpinos-core): start
             # the new one rather than keep running the old code.
             self.exit("restart")
+            return
+        # Coming back from suspend() doesn't fire on_screen_resume, so
+        # re-read the values the action may have changed (e.g. "installed").
+        if isinstance(self.screen, MenuScreen):
+            self.screen.rebuild()
 
     async def run_action_captured(self, *action: str) -> tuple[int, str]:
         """Runs an action that only prints a message (the setters)."""

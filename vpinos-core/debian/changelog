@@ -1,3 +1,13 @@
+vpinos-core (1.1.20) trixie; urgency=medium
+
+  * VR > Setup > Install VR components now shows "installed" as soon
+    as it finishes, without backing out of the menu. Other menu values
+    (like VPX Editor) also refresh after their action runs.
+  * VR > "Pair new headset" no longer says "(Wi-Fi)": pairing with a
+    PIN is needed for USB headsets too.
+
+ -- Superhac <superhac007@gmail.com>  Mon, 09 Nov 2026 09:06:07 -0600
+
 vpinos-core (1.1.19) trixie; urgency=medium
 
   * Launch VPinball Example Table works again. Newer VPinball builds
