@@ -123,21 +123,37 @@ launch() {
 # so the cache works normally -- without changing any permissions in
 # /opt and without affecting any other table. A copy, not a symlink:
 # not confirmed whether VPX resolves a symlink back to /opt when it
-# picks the cache folder. Refreshed (and its cache dropped) whenever
-# the vpinball package ships a newer one.
+# picks the cache folder.
+#
+# Newer vpinball builds ship the table in the expanded format, a
+# directory (exampleTable.vpz), instead of exampleTable.vpx; older ones
+# still have the .vpx, so whichever is there is used. A directory's
+# mtime doesn't change when the files in it do, so the copy is
+# refreshed (with its cache) whenever the installed vpinball version
+# differs from the one it was copied from, not by comparing dates.
 launch_example_table() {
-    src=/opt/vpinball/assets/exampleTable.vpx
+    src=/opt/vpinball/assets/exampleTable.vpz
+    [ -e "$src" ] || src=/opt/vpinball/assets/exampleTable.vpx
+    if [ ! -e "$src" ]; then
+        log "no example table in /opt/vpinball/assets"
+        echo "The installed VPinball doesn't include the example table."
+        pause
+        return
+    fi
+    table=${src##*/}
     dir="$HOME/.local/share/vpinos/exampleTable"
-    mkdir -p "$dir"
-    if [ ! -e "$dir/exampleTable.vpx" ] || [ "$src" -nt "$dir/exampleTable.vpx" ]; then
-        if cp "$src" "$dir/exampleTable.vpx"; then
-            rm -rf "$dir/cache"
+    stamp="$dir/.vpinball-version"
+    version=$(dpkg-query -W -f='${Version}' vpinball 2>/dev/null)
+    if [ ! -e "$dir/$table" ] || [ "$(cat "$stamp" 2>/dev/null)" != "$version" ]; then
+        rm -rf "$dir"
+        if mkdir -p "$dir" && cp -R "$src" "$dir/"; then
+            echo "$version" >"$stamp"
         else
             log "couldn't copy the example table, launching it from /opt"
             dir=/opt/vpinball/assets
         fi
     fi
-    launch vpinball /opt/vpinball/VPinballX_BGFX -play "$dir/exampleTable.vpx"
+    launch vpinball /opt/vpinball/VPinballX_BGFX -play "$dir/$table"
 }
 
 # --- Main --------------------------------------------------------------

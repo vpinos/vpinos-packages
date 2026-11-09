@@ -16,7 +16,7 @@
 # specific, just the compositor binary and its config files changed.)
 #
 # Usage: vpinos-launch <name-for-logging> <command> [args...]
-#   e.g. vpinos-launch vpinball /opt/vpinball/VPinballX_BGFX -play /opt/vpinball/assets/exampleTable.vpx
+#   e.g. vpinos-launch vpinball /opt/vpinball/VPinballX_BGFX -play /opt/vpinball/assets/exampleTable.vpz
 #        vpinos-launch vpinfe /opt/vpinfe/vpinfe
 #
 # The name "windowed" is reserved: it gets hyprland.conf's floating

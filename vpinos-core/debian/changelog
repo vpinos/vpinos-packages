@@ -1,3 +1,11 @@
+vpinos-core (1.1.19) trixie; urgency=medium
+
+  * Launch VPinball Example Table works again. Newer VPinball builds
+    ship the example table as exampleTable.vpz instead of
+    exampleTable.vpx, so the menu failed with "cp: cannot stat".
+
+ -- Superhac <superhac007@gmail.com>  Mon, 09 Nov 2026 08:05:55 -0600
+
 vpinos-core (1.1.18) trixie; urgency=medium
 
   * DOF and other USB cabinet hardware (FTDI/serial boards, Pinscape,
