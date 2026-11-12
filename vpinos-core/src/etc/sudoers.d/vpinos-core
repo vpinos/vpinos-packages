@@ -87,6 +87,11 @@
 # script, which only ever installs the vpxtool package.
 %sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-vpxtool-setup.sh
 
+# vpinos-menu's Tools > Pinscape-Cross option, when Pinscape-Cross isn't
+# installed yet -- same as VPX Editor's rule above: scoped to this one
+# dedicated script, which only ever installs the pinscape-cross package.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-pinscape-cross-setup.sh
+
 # vpinos-menu's Tools > "Reset Saved Settings" option (live USB with
 # saved settings only) -- removing the saved-settings partition's
 # persistence.conf needs root. Scoped to this one script's reset, which

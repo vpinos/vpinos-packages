@@ -151,6 +151,14 @@ def vpxtool_state() -> str:
     return "not installed"
 
 
+def pinscape_cross_state() -> str:
+    if not is_amd64():
+        return "amd64 only"
+    if output("/usr/libexec/vpinos/vpinos-pinscape-cross-setup.sh", "status") == "installed":
+        return ""
+    return "not installed"
+
+
 def version() -> str:
     """vpinos-core's version is the VPinOS version (it moves with every
     update); os-release's VERSION_ID only names the ISO the system was
@@ -479,7 +487,7 @@ class MainScreen(MenuScreen):
                 Item("4", "Update VPinOS", self.terminal("update", restart=True),
                      help="Install the latest VPinOS updates (needs internet)."),
                 Item("5", "Testing", self.open(TestingScreen), help="Try the cabinet out."),
-                Item("6", "Tools", self.open(ToolsScreen), help="System info, VPX Editor and vpxtool."),
+                Item("6", "Tools", self.open(ToolsScreen), help="System info, VPX Editor, vpxtool and Pinscape-Cross."),
             ]
         else:
             items += [
@@ -487,7 +495,7 @@ class MainScreen(MenuScreen):
                 Item("3", "VR", self.open(VrScreen), help="Play in a VR headset over WiVRn."),
                 Item("4", "Install VPinOS", self.terminal("install"),
                      help="Install VPinOS from this USB stick to a disk."),
-                Item("5", "Tools", self.open(ToolsScreen), help="System info, VPX Editor and vpxtool."),
+                Item("5", "Tools", self.open(ToolsScreen), help="System info, VPX Editor, vpxtool and Pinscape-Cross."),
             ]
         items += [
             SEPARATOR,
@@ -634,9 +642,11 @@ class ToolsScreen(MenuScreen):
                  help="Edit tables (installs on first use, ~530 MB)."),
             Item("3", "vpxtool", self.terminal("vpxtool"), value=vpxtool_state(),
                  help="Command-line table tools in a shell (installs on first use, ~6 MB)."),
+            Item("4", "Pinscape-Cross", self.terminal("pinscape-cross"), value=pinscape_cross_state(),
+                 help="Configure a Pinscape Pico board (installs on first use, up to ~180 MB)."),
         ]
         if persistence()[0] == "saving":
-            items.append(Item("4", "Reset Saved Settings",
+            items.append(Item("5", "Reset Saved Settings",
                               confirm(self, "Clear all saved settings on this USB stick and reboot?",
                                       "reset-saved-settings", "tools/reset-saved-settings"),
                               help="Start fresh: clears what's saved on this USB stick, then reboots."))

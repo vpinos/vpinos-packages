@@ -320,11 +320,19 @@ tools_submenu() {
         else
             xstate=" (not installed)"
         fi
+        if [ "$(dpkg --print-architecture)" != amd64 ]; then
+            pstate=" (amd64 only)"
+        elif pinscape_cross_installed; then
+            pstate=""
+        else
+            pstate=" (not installed)"
+        fi
         echo "2) VPX Editor$estate"
         echo "3) vpxtool$xstate"
+        echo "4) Pinscape-Cross$pstate"
         if [ "$(persistence_state)" = saving ]; then
             saved=1
-            echo "4) Reset Saved Settings"
+            echo "5) Reset Saved Settings"
         else
             saved=0
         fi
@@ -335,7 +343,8 @@ tools_submenu() {
             1) action_sysinfo ;;
             2) action_vpx_editor ;;
             3) action_vpxtool ;;
-            4)
+            4) action_pinscape_cross ;;
+            5)
                 if [ "$saved" = 0 ]; then
                     invalid
                 elif confirm "Clear all saved settings on this USB stick and reboot?"; then
