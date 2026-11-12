@@ -107,6 +107,10 @@ vpx_editor_installed() {
     [ "$(/usr/libexec/vpinos/vpinos-vpx-editor-setup.sh status 2>/dev/null)" = installed ]
 }
 
+vpxtool_installed() {
+    [ "$(/usr/libexec/vpinos/vpinos-vpxtool-setup.sh status 2>/dev/null)" = installed ]
+}
+
 # Runs vpinos-launch and logs how it ended, the same two log lines every
 # graphical item has always written.
 launch() {
@@ -374,6 +378,61 @@ action_vpx_editor() {
         fi
     fi
     launch x11 /usr/bin/vpx-editor
+}
+
+# Not in the image either (see vpinos-vpxtool-setup.sh), so the first use
+# offers to install it, like VPX Editor. vpxtool is a command-line tool,
+# so this opens a shell in the tables folder (VPinFE's tablerootdir
+# default) with a short list of its commands; `exit` comes back to the
+# menu. vpxtool's own "frontend" isn't used: it would start vpinball
+# straight from the console, without vpinos-launch and Hyprland.
+#
+# The INT handler is the same as action_vr_log's: Ctrl+C at the prompt
+# belongs to bash, never to this script.
+action_vpxtool() {
+    log "selected tools/vpxtool"
+    if ! vpxtool_installed; then
+        echo "vpxtool isn't installed (~6 MB download, needs internet)."
+        if ! is_installed; then
+            echo "Live USB: it will be lost on reboot."
+        fi
+        printf "Install it now? [y/N]: "
+        read -r confirm
+        case "$confirm" in
+            y|Y) ;;
+            *) return ;;
+        esac
+        sudo /usr/libexec/vpinos/vpinos-vpxtool-setup.sh install
+        rc=$?
+        log "vpinos-vpxtool-setup.sh exited $rc"
+        if [ "$rc" != 0 ]; then
+            pause
+            return
+        fi
+    fi
+    dir="$HOME/tables"
+    [ -d "$dir" ] || dir="$HOME"
+    clear
+    cat <<VPXTOOL_HELP
+$(vpxtool --version 2>/dev/null)
+
+Some commands (vpxtool --help lists them all, vpxtool help <command>
+explains one):
+
+  vpxtool info show <table.vpx>      table name, author, version
+  vpxtool romname <table.vpx>        the PinMAME ROM it uses
+  vpxtool verify <table.vpx>         check the file's structure
+  vpxtool extractvbs <table.vpx>     save the table script as .vbs
+  vpxtool extract <table.vpx>        unpack the whole table to a folder
+  vpxtool diff <table.vpx>           table script vs the .vbs next to it
+
+You're in $dir. Type exit to go back to the menu.
+
+VPXTOOL_HELP
+    trap 'true' INT
+    (cd "$dir" && bash -i)
+    trap - INT
+    log "vpxtool shell exited"
 }
 
 # Live USB with saved settings only. Clears them and reboots: the next

@@ -145,6 +145,12 @@ def vpx_editor_state() -> str:
     return "not installed"
 
 
+def vpxtool_state() -> str:
+    if output("/usr/libexec/vpinos/vpinos-vpxtool-setup.sh", "status") == "installed":
+        return ""
+    return "not installed"
+
+
 def version() -> str:
     """vpinos-core's version is the VPinOS version (it moves with every
     update); os-release's VERSION_ID only names the ISO the system was
@@ -473,7 +479,7 @@ class MainScreen(MenuScreen):
                 Item("4", "Update VPinOS", self.terminal("update", restart=True),
                      help="Install the latest VPinOS updates (needs internet)."),
                 Item("5", "Testing", self.open(TestingScreen), help="Try the cabinet out."),
-                Item("6", "Tools", self.open(ToolsScreen), help="System info and the VPX Editor."),
+                Item("6", "Tools", self.open(ToolsScreen), help="System info, VPX Editor and vpxtool."),
             ]
         else:
             items += [
@@ -481,7 +487,7 @@ class MainScreen(MenuScreen):
                 Item("3", "VR", self.open(VrScreen), help="Play in a VR headset over WiVRn."),
                 Item("4", "Install VPinOS", self.terminal("install"),
                      help="Install VPinOS from this USB stick to a disk."),
-                Item("5", "Tools", self.open(ToolsScreen), help="System info and the VPX Editor."),
+                Item("5", "Tools", self.open(ToolsScreen), help="System info, VPX Editor and vpxtool."),
             ]
         items += [
             SEPARATOR,
@@ -626,9 +632,11 @@ class ToolsScreen(MenuScreen):
                  help="Hardware, drivers, screens and sound devices."),
             Item("2", "VPX Editor", self.terminal("vpx-editor"), value=vpx_editor_state(),
                  help="Edit tables (installs on first use, ~530 MB)."),
+            Item("3", "vpxtool", self.terminal("vpxtool"), value=vpxtool_state(),
+                 help="Command-line table tools in a shell (installs on first use, ~6 MB)."),
         ]
         if persistence()[0] == "saving":
-            items.append(Item("3", "Reset Saved Settings",
+            items.append(Item("4", "Reset Saved Settings",
                               confirm(self, "Clear all saved settings on this USB stick and reboot?",
                                       "reset-saved-settings", "tools/reset-saved-settings"),
                               help="Start fresh: clears what's saved on this USB stick, then reboots."))

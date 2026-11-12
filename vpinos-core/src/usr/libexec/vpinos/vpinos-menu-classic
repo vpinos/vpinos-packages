@@ -315,10 +315,16 @@ tools_submenu() {
             estate=" (not installed)"
         fi
         echo "1) System Info (Debug)"
+        if vpxtool_installed; then
+            xstate=""
+        else
+            xstate=" (not installed)"
+        fi
         echo "2) VPX Editor$estate"
+        echo "3) vpxtool$xstate"
         if [ "$(persistence_state)" = saving ]; then
             saved=1
-            echo "3) Reset Saved Settings"
+            echo "4) Reset Saved Settings"
         else
             saved=0
         fi
@@ -328,7 +334,8 @@ tools_submenu() {
         case "$choice" in
             1) action_sysinfo ;;
             2) action_vpx_editor ;;
-            3)
+            3) action_vpxtool ;;
+            4)
                 if [ "$saved" = 0 ]; then
                     invalid
                 elif confirm "Clear all saved settings on this USB stick and reboot?"; then

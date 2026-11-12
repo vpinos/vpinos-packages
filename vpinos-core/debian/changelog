@@ -1,3 +1,13 @@
+vpinos-core (1.1.21) trixie; urgency=medium
+
+  * New Tools > vpxtool: opens a command prompt in the tables folder
+    with vpxtool, a command-line tool for .vpx files (table info, ROM
+    name, checking, extracting and comparing the script). It's
+    installed the first time you pick it (about 6 MB, needs internet).
+  * Tools > Reset Saved Settings is now option 4.
+
+ -- Superhac <superhac007@gmail.com>  Thu, 12 Nov 2026 09:25:35 -0600
+
 vpinos-core (1.1.20) trixie; urgency=medium
 
   * VR > Setup > Install VR components now shows "installed" as soon
