@@ -1,3 +1,11 @@
+vpinos-core (1.1.22) trixie; urgency=medium
+
+  * Tools > VPX Editor now opens maximized, filling the screen,
+    instead of as a small window in the middle.
+  * VPX Editor now runs on Wayland directly instead of through X11.
+
+ -- Superhac <superhac007@gmail.com>  Thu, 12 Nov 2026 10:01:31 -0600
+
 vpinos-core (1.1.21) trixie; urgency=medium
 
   * New Tools > vpxtool: opens a command prompt in the tables folder

@@ -135,6 +135,52 @@ apply_table_rotation() {
     return 0
 }
 
+# Maximizes the first window an "x11"/"windowed" client opens. The
+# windowed Hyprland config floats every window (windowed-float), and a
+# floating window keeps whatever size the app asks for -- VPX Editor
+# (Electron) came up as a small window in the middle of the screen.
+# Hyprland ignores a floating window's own maximize request, so once the
+# window has mapped, ask Hyprland to maximize it (`fullscreen 1` =
+# maximize: keeps the gaps and border, and SUPER+Q still closes it) --
+# the same fix vpinos-config's maximize_chrome_window() uses for its
+# Chrome window. Done here rather than as a windowrule in hyprland.conf,
+# which is seed-only and never reaches existing installations. Only the
+# first window: dialogs the app opens later keep their own size. Runs in
+# the background, best-effort: on a timeout the window stays as it is.
+# Not for the installer, which keeps its own size.
+maximize_first_window() {
+    hypr_sock=$(wait_for_glob "$runtime_dir/hypr/*/.socket.sock") || return 0
+    HYPRLAND_INSTANCE_SIGNATURE=$(basename "$(dirname "$hypr_sock")")
+    export HYPRLAND_INSTANCE_SIGNATURE
+    i=0
+    while [ "$i" -lt 80 ]; do
+        address=$(hyprctl -j clients 2>/dev/null | python3 -c '
+import json, sys
+try:
+    clients = json.load(sys.stdin)
+except ValueError:
+    clients = []
+for c in clients:
+    if c.get("mapped") and not c.get("hidden"):
+        print(c.get("address", ""), c.get("fullscreen", 0))
+        break
+')
+        if [ -n "$address" ]; then
+            set -- $address
+            hyprctl dispatch focuswindow "address:$1" >/dev/null 2>&1 || true
+            if [ "${2:-0}" = 0 ]; then
+                hyprctl dispatch fullscreen 1 >/dev/null 2>&1 || true
+            fi
+            echo "$(date -Is): vpinos-launch: maximized $client_name's window $1" >>"$log_file"
+            return 0
+        fi
+        sleep 0.25
+        i=$((i + 1))
+    done
+    echo "$(date -Is): vpinos-launch: no $client_name window to maximize after 20s" >>"$log_file"
+    return 0
+}
+
 launch_client() {
     # $@ here comes from the explicit args passed at the call site
     # below (`launch_client "$@" &`) -- a shell function called with no
@@ -195,6 +241,9 @@ launch_client() {
     fi
 
     apply_table_rotation
+    case "$client_name" in
+        x11 | windowed) maximize_first_window & ;;
+    esac
     echo "$(date -Is): vpinos-launch: launching $client_name -- $display_label -- $*" >>"$log_file"
     # stdbuf -oL -eL: output redirected to a file (not a terminal)
     # normally switches C stdio from line-buffered to fully-buffered,

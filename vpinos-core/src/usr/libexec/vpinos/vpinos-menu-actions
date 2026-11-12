@@ -346,9 +346,14 @@ action_sysinfo() {
 
 # Not in the image (big, amd64-only -- see vpinos-vpx-editor-setup.sh),
 # so the first use offers to install it. Launched as vpinos-launch's
-# "x11" client: an Electron app that gets Xwayland's DISPLAY and a normal
-# floating window (the windowed Hyprland config), like the installer, so
-# it can be closed.
+# "windowed" client: native Wayland, in the windowed Hyprland config,
+# where vpinos-launch maximizes its window (maximize_first_window) and
+# SUPER+Q closes it. It used to be the "x11" client (Xwayland), like the
+# installer, though nothing ever needed that for VPX Editor; it's
+# Electron 43, which runs on Wayland natively. --ozone-platform=wayland
+# says so explicitly rather than leaving it to Electron's
+# auto-detection: the windowed client gets no DISPLAY, so a fallback to
+# X11 would just fail to open.
 action_vpx_editor() {
     log "selected tools/vpx-editor"
     if [ "$(dpkg --print-architecture)" != amd64 ]; then
@@ -377,7 +382,7 @@ action_vpx_editor() {
             return
         fi
     fi
-    launch x11 /usr/bin/vpx-editor
+    launch windowed /usr/bin/vpx-editor --ozone-platform=wayland
 }
 
 # Not in the image either (see vpinos-vpxtool-setup.sh), so the first use
