@@ -176,6 +176,12 @@ encoder_hint() {
 # returns 1 if there are any.
 check() {
     has_vendor 0x10de || return 0
+    if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = nvidia-legacy ]; then
+        # Decided: NVENC stays on the current driver only (no CUDA or
+        # encoder libraries in the legacy package). Not a problem to fix.
+        echo "Hardware encoding (NVENC) needs the NVIDIA proprietary driver (RTX 20/GTX 16 and newer). The legacy driver uses CPU encoding."
+        return 0
+    fi
     [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = nvidia ] || return 0
     rc=0
     if ! is_installed libcuda1 || ! is_installed libnvidia-encode1; then
@@ -200,6 +206,17 @@ start() {
     # vpinos-launch would otherwise do it on the next launch, swapping
     # drivers out from under a server that's already running.
     sudo /usr/libexec/vpinos/vpinos-gpu-driver.sh
+    # NVIDIA legacy (580) driver: wivrn-server renders with Vulkan, and
+    # the system path holds the current driver's libraries, which refuse
+    # a 580 kernel module. Same redirect vpinos-launch does for its
+    # session, handed to the user manager that starts wivrn.service.
+    # (No NVENC on the legacy driver: WiVRn encodes on the CPU.)
+    if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = nvidia-legacy ] \
+        && [ "$(cat /run/vpinos/nvidia-loaded 2>/dev/null)" = nvidia-legacy ]; then
+        systemctl --user set-environment LD_LIBRARY_PATH=/usr/lib/vpinos/nvidia-legacy/lib
+    else
+        systemctl --user unset-environment LD_LIBRARY_PATH
+    fi
     # Picks up vpinos-vr-setup.sh's log drop-in on a session that was
     # already running when it got installed.
     systemctl --user daemon-reload

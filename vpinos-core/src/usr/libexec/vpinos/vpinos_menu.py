@@ -546,7 +546,7 @@ class SetupScreen(MenuScreen):
                  value=ROTATIONS[console_rotation()],
                  help="Turn this menu for a Table screen mounted in portrait."),
             Item("2", "GPU Driver", self.open(GpuDriverScreen), value=gpu_driver(),
-                 help="Open-source Mesa/NVK, or the NVIDIA proprietary driver."),
+                 help="Open-source Mesa/NVK, or the NVIDIA proprietary or legacy driver."),
             Item("3", "VPinOS Configuration", self.terminal("vpinos-config"),
                  help="Screens, refresh rates, table rotation, VPinball and VPinFE options."),
             Item("4", "Network Settings", self.terminal("network"),
@@ -580,7 +580,8 @@ class GpuDriverScreen(ChoiceScreen):
     setter = "set-gpu-driver"
     choices = [
         ("default", "Default", "The open-source Mesa/NVK driver."),
-        ("nvidia", "NVIDIA proprietary", "NVIDIA's own driver (Turing/GTX 16 and newer; Secure Boot must be off)."),
+        ("nvidia", "NVIDIA proprietary", "NVIDIA's own driver (RTX 20/GTX 16 and newer; Secure Boot must be off)."),
+        ("nvidia-legacy", "NVIDIA legacy", "NVIDIA's 580 driver for GTX 750 to 10-series and Titan V (Secure Boot must be off; no VR hardware encoding)."),
     ]
 
     def current_value(self) -> str:

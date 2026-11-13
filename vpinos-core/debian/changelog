@@ -1,3 +1,16 @@
+vpinos-core (1.1.24) trixie; urgency=medium
+
+  * New Setup > GPU Driver option: NVIDIA legacy, NVIDIA's 580 driver
+    for GTX 750 to 10-series and Titan V cards (Maxwell, Pascal, Volta),
+    which the NVIDIA proprietary driver no longer supports. Like the
+    proprietary driver it switches on the next launch, without a
+    reboot, and Secure Boot must be off. VR with it encodes on the
+    CPU: hardware encoding (NVENC) needs the proprietary driver.
+  * NVIDIA proprietary is now described as for RTX 20/GTX 16 and newer.
+  * System Info shows which NVIDIA driver is loaded.
+
+ -- Superhac <superhac007@gmail.com>  Fri, 13 Nov 2026 10:28:58 -0600
+
 vpinos-core (1.1.23) trixie; urgency=medium
 
   * New Tools > Pinscape-Cross: opens Pinscape-Cross, the configuration

@@ -439,6 +439,10 @@ if [ -n "$intel_card" ] && [ -n "$other_card" ]; then
         0x10de)
             if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = "nvidia" ]; then
                 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+            elif [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = "nvidia-legacy" ]; then
+                # Set again (with the rest of the legacy env) below,
+                # once the legacy driver is confirmed loaded.
+                export VK_ICD_FILENAMES=/usr/lib/vpinos/nvidia-legacy/share/vulkan/icd.d/nvidia_legacy_icd.json
             else
                 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nouveau_icd.json
             fi
@@ -449,6 +453,29 @@ if [ -n "$intel_card" ] && [ -n "$other_card" ]; then
             export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
             ;;
     esac
+fi
+
+# NVIDIA legacy: where the 580 libraries are, for the client AND the
+# compositor -- so set before launch_client forks, unlike the
+# compositor-only NVIDIA env further down. The legacy driver lives beside
+# the current one under its own prefix (vpinos-nvidia-legacy); the system
+# path holds the current driver's libraries, which refuse a 580 kernel
+# module ("API mismatch"). With LD_LIBRARY_PATH first, every NVIDIA
+# library lookup resolves to 580: glvnd's GLX vendor, the system EGL
+# vendor and Vulkan ICD files (they name libEGL_nvidia.so.0 /
+# libGLX_nvidia.so.0 without a path), NVIDIA's own dlopens, and GBM's
+# nvidia-drm backend via GBM_BACKENDS_PATH. Mesa and Intel stay
+# discoverable, so the hybrid-laptop case above keeps working. Only when
+# vpinos-gpu-driver.sh really loaded the legacy driver: a failed load
+# falls back to nouveau, which must not see these.
+if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = nvidia-legacy ] \
+    && lsmod | grep -q '^nvidia_drm ' \
+    && [ "$(cat /run/vpinos/nvidia-loaded 2>/dev/null)" = nvidia-legacy ]; then
+    legacy=/usr/lib/vpinos/nvidia-legacy
+    export LD_LIBRARY_PATH="$legacy/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export GBM_BACKENDS_PATH="$legacy/lib/gbm"
+    export PATH="$legacy/bin:$PATH"
+    echo "$(date -Is): vpinos-launch: NVIDIA legacy driver loaded -- libraries from $legacy" >>"$log_file"
 fi
 
 launch_client "$@" &
@@ -478,18 +505,33 @@ launch_client "$@" &
 # the unsigned module, a kernel mismatch, ...) -- forcing these with no
 # nvidia driver underneath hung Hyprland on a black screen.
 nvidia_ok=0
-if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = "nvidia" ]; then
-    if lsmod | grep -q '^nvidia_drm '; then
-        nvidia_ok=1
-    else
-        echo "$(date -Is): vpinos-launch: gpu-driver is nvidia but nvidia_drm isn't loaded (Secure Boot?) -- not forcing nvidia GBM/EGL" >>"$log_file"
-    fi
-fi
+gpu_mode=$(cat /etc/vpinos/gpu-driver 2>/dev/null)
+case "$gpu_mode" in
+    nvidia|nvidia-legacy)
+        # Which NVIDIA driver vpinos-gpu-driver.sh actually loaded: both
+        # are "nvidia" in lsmod, so it records the one it loaded. A
+        # failed legacy load falls back to nouveau and leaves no marker.
+        if lsmod | grep -q '^nvidia_drm ' \
+            && [ "$(cat /run/vpinos/nvidia-loaded 2>/dev/null || echo nvidia)" = "$gpu_mode" ]; then
+            nvidia_ok=1
+        else
+            echo "$(date -Is): vpinos-launch: gpu-driver is $gpu_mode but that driver isn't loaded (Secure Boot? unsupported card?) -- not forcing nvidia GBM/EGL" >>"$log_file"
+        fi
+        ;;
+esac
 if [ "$nvidia_ok" = 1 ] && [ "$compositor_on_intel" = 0 ]; then
     export LIBVA_DRIVER_NAME=nvidia
     export GBM_BACKEND=nvidia-drm
     export __GLX_VENDOR_LIBRARY_NAME=nvidia
-    export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+    if [ "$gpu_mode" = nvidia-legacy ]; then
+        # Library locations are already set for everything (before
+        # launch_client, see "NVIDIA legacy" above); the compositor
+        # additionally gets the legacy EGL vendor file (absolute path into
+        # the prefix) instead of the current driver's.
+        export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/lib/vpinos/nvidia-legacy/share/egl_vendor.d/10_nvidia_legacy.json
+    else
+        export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+    fi
 fi
 
 # Xwayland (weston's own, and per Hyprland's docs its integration works
@@ -560,4 +602,22 @@ esac
 # documented for exactly this purpose; verify on a real installer boot.
 hypr_flags=""
 [ "$client_name" = "installer" ] && hypr_flags="--i-am-really-stupid"
-exec /usr/bin/Hyprland $hypr_flags --config "$hypr_config" >>/var/log/vpinos-hyprland.log 2>&1
+
+# NVIDIA legacy driver: start Hyprland through the dynamic loader.
+# Debian's hyprland postinst gives /usr/bin/Hyprland cap_sys_nice=ep, and
+# a binary with file capabilities runs in secure mode (AT_SECURE): ld.so
+# ignores LD_LIBRARY_PATH and Mesa's GBM ignores GBM_BACKENDS_PATH. The
+# 580 libEGL_nvidia then can't find its own libnvidia-glsi/eglcore, EGL
+# has no vendor ("Supported EGL client extensions: (0)", aquamarine
+# aborts in loadEGLAPI) and GBM would load the current driver's backend.
+# Confirmed on a real GTX 1650 (test ISO, 2026-11-13). Exec'ing the
+# loader runs the binary without its file capabilities, so the legacy
+# library paths set above apply; the only loss is cap_sys_nice
+# (Hyprland can't raise its own scheduling priority and says so in its
+# log). The other modes keep the plain exec and the capability.
+hypr_exec=/usr/bin/Hyprland
+if [ "$nvidia_ok" = 1 ] && [ "$gpu_mode" = nvidia-legacy ] && [ -x /lib64/ld-linux-x86-64.so.2 ]; then
+    hypr_exec="/lib64/ld-linux-x86-64.so.2 /usr/bin/Hyprland"
+fi
+# shellcheck disable=SC2086
+exec $hypr_exec $hypr_flags --config "$hypr_config" >>/var/log/vpinos-hyprland.log 2>&1

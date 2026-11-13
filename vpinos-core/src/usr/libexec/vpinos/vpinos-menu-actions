@@ -292,7 +292,39 @@ action_set_gpu_driver() {
             fi
             echo "Will use the NVIDIA proprietary driver on the next launch."
             ;;
-        *) echo "usage: set-gpu-driver default|nvidia" >&2; return 2 ;;
+        nvidia-legacy)
+            # NVIDIA's 580 branch, for Maxwell/Pascal/Volta cards the
+            # current driver no longer supports. Installed beside it
+            # under /usr/lib/vpinos/nvidia-legacy (vpinos-nvidia-legacy*
+            # packages); vpinos-gpu-driver.sh insmods it, vpinos-launch
+            # points the session at it. Same Secure Boot refusal as
+            # nvidia: the closed module is unsigned too.
+            if grep -qE '\[(integrity|confidentiality)\]' /sys/kernel/security/lockdown 2>/dev/null; then
+                log "gpu-driver nvidia-legacy refused -- Secure Boot lockdown active"
+                echo "Secure Boot is enabled, so the NVIDIA legacy driver"
+                echo "can't load. Disable Secure Boot in your BIOS/UEFI setup"
+                echo "to use it. No change made."
+                return 3
+            fi
+            # The modules are per kernel; a kernel they weren't built for
+            # (e.g. a release that had to drop them) can't use this mode.
+            if [ ! -e "/usr/lib/vpinos/nvidia-legacy/modules/$(uname -r)/nvidia.ko.xz" ]; then
+                log "gpu-driver nvidia-legacy refused -- no legacy modules for $(uname -r)"
+                echo "The NVIDIA legacy driver isn't available for this kernel"
+                echo "($(uname -r)). Run Update VPinOS, or use another driver."
+                echo "No change made."
+                return 3
+            fi
+            echo "nvidia-legacy" > /etc/vpinos/gpu-driver
+            log "gpu-driver set to nvidia-legacy"
+            if on_kmscon; then
+                echo "Switching to the NVIDIA legacy driver now."
+                restart_console gpu-driver
+                return 0
+            fi
+            echo "Will use the NVIDIA legacy driver on the next launch."
+            ;;
+        *) echo "usage: set-gpu-driver default|nvidia|nvidia-legacy" >&2; return 2 ;;
     esac
 }
 

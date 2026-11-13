@@ -157,13 +157,15 @@ gpu_driver_submenu() {
         echo "Currently: $cur"
         echo
         echo "1) Default (open-source Mesa/NVK)"
-        echo "2) NVIDIA proprietary"
+        echo "2) NVIDIA proprietary (RTX 20/GTX 16 and newer)"
+        echo "3) NVIDIA legacy (GTX 750 to 10-series, Titan V)"
         echo "q) Cancel, no change"
         echo "=============================="
         choose
         case "$choice" in
             1) action_set_gpu_driver default; after_set $?; return ;;
             2) action_set_gpu_driver nvidia; after_set $?; return ;;
+            3) action_set_gpu_driver nvidia-legacy; after_set $?; return ;;
             q|Q) return ;;
             *) invalid ;;
         esac

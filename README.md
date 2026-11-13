@@ -8,8 +8,10 @@ through apt instead of a reinstall.
 |---|---|
 | `vpinos-core` | The console menu (`vpinos-menu`), the Hyprland kiosk launcher (`vpinos-launch`), the VPinOS configuration tool (`vpinos-config`), their root helpers (`/usr/libexec/vpinos/`), sudoers rules, systemd units and login hooks, plus the default system configuration. Depends on `vpinos-platform` and `vpinos-kernel` |
 | `vpinos-platform` | The apt pins that hold the kernel, Mesa, firmware and NVIDIA driver in place (frozen backports snapshot, exact NVIDIA version), plus on amd64 the NVIDIA modprobe settings. No version-locked dependencies (see [Upgrading the kernel or NVIDIA driver](#upgrading-the-kernel-or-nvidia-driver)) |
-| `vpinos-kernel` | The exact kernel, plus on amd64 the NVIDIA modules built for it |
+| `vpinos-kernel` | The exact kernel, plus on amd64 both sets of NVIDIA modules built for it |
 | `vpinos-nvidia-modules-<kernel>` | amd64 only: the open NVIDIA kernel modules prebuilt for exactly that kernel, holding the NVIDIA userspace at exactly the same version. VPinOS installations never need DKMS or a compiler |
+| `vpinos-nvidia-legacy` | amd64 only: NVIDIA's 580 driver userspace for Maxwell, Pascal and Volta (GTX 750 to 10-series, Titan V), from NVIDIA's `.run` installer (`NVIDIA_LEGACY_*` in `versions.env`). Installed side by side under `/usr/lib/vpinos/nvidia-legacy`, so it never touches the system's NVIDIA libraries; used only when Setup > GPU Driver is NVIDIA legacy |
+| `vpinos-nvidia-legacy-modules-<kernel>` | amd64 only: the closed 580 kernel modules prebuilt for exactly that kernel, under `/usr/lib/vpinos/nvidia-legacy/modules/<kernel>/` (outside `/lib/modules`, so nothing loads them unless the legacy driver is chosen) |
 
 Packages are built here, released as GitHub releases, and published by
 [`vpinos/deb-repo`](https://github.com/vpinos/deb-repo), the single signed
@@ -18,7 +20,7 @@ apt repository every VPinOS image uses:
 ```
 deb-package-builder  --+  (vpinball, vpinfe, vpxconfig, WiVRn, xrizer)
                        +-->  deb-repo (signs + publishes the apt repo)  -->  VPinOS installations
-vpinos-packages  ------+  (vpinos-core, vpinos-platform, vpinos-kernel, vpinos-nvidia-modules)
+vpinos-packages  ------+  (vpinos-core, vpinos-platform, vpinos-kernel, vpinos-nvidia-modules, vpinos-nvidia-legacy*)
 ```
 
 ## Layout
@@ -34,7 +36,7 @@ vpinos-platform/
 └── postinst       writes the pins + modprobe files on every install/upgrade
 Dockerfile         trixie build image (debhelper, lintian, visudo)
 build.sh           builds vpinos-core into dist/
-build-platform.sh  builds vpinos-platform, vpinos-kernel and the NVIDIA modules into dist/
+build-platform.sh  builds vpinos-platform, vpinos-kernel, the NVIDIA modules and the NVIDIA legacy packages into dist/
 tools/menu-dry-run runs the Textual vpinos-menu from this checkout, every item a dry run
 .github/workflows/
 ├── build.yml      every push/PR: build everything, upload the .debs as artifacts
@@ -46,11 +48,11 @@ tools/menu-dry-run runs the Textual vpinos-menu from this checkout, every item a
 ```sh
 docker build -t vpinos-packages-builder .
 ./build.sh vpinos-core
-./build-platform.sh          # kernel/NVIDIA packages; about 3 minutes, needs network
+./build-platform.sh          # kernel/NVIDIA packages; about 5 minutes, needs network
 ```
 
 This gives you `dist/vpinos-core_<version>_all.deb` and a `.deb.sha256`, and
-the platform, kernel and NVIDIA module debs.
+the platform, kernel, NVIDIA module and NVIDIA legacy debs.
 The build also checks the sudoers file with `visudo -cf` and runs lintian.
 
 To try a change on a test machine, copy the .deb over and install it with
@@ -235,23 +237,28 @@ versions and how to test, is in the VPinOS repo's
 `notes/skills/upgrade-kernel-nvidia/SKILL.md`. In short:
 
 1. **Edit `versions.env`.** Always bump `PLATFORM_VERSION`, even for a
-   rollback. Change `SNAPSHOT` + `KERNEL_ABI` for a kernel, or
-   `NVIDIA_VERSION` + `NVIDIA_DEB_VERSION` for a driver.
+   rollback. Change `SNAPSHOT` + `KERNEL_ABI` for a kernel,
+   `NVIDIA_VERSION` + `NVIDIA_DEB_VERSION` for the current driver, or
+   `NVIDIA_LEGACY_VERSION` + `NVIDIA_LEGACY_SHA256` (from NVIDIA's
+   `.run.sha256sum`, revision back to 1) for the legacy 580 driver.
 2. **Edit the matching apt files:** `vpinos-platform/apt/vpinos-backports.list`
    (snapshot date) and `vpinos-platform/apt/vpinos-nvidia-repo.pref`
    (`Pin: version <NVIDIA_VERSION>-*`).
 3. **`./build-platform.sh`.** It refuses to build if step 1 and step 2
    disagree, builds the NVIDIA modules against the exact kernel, and warns
    if NVIDIA's userspace package list changed (add new names to
-   `NVIDIA_USERSPACE`).
+   `NVIDIA_USERSPACE`). It also builds the closed legacy 580 modules from
+   the `.run`; **if they don't compile against a new kernel, the build
+   fails** (options: a newer 580.x, hold the kernel, or ship without legacy
+   modules for that kernel; see the skill).
 4. **Test** on a test machine (`sudo apt install ./…deb`, reboot, check
-   Setup → GPU Driver both ways) or in a local ISO.
+   Setup → GPU Driver through all three choices) or in a local ISO.
 5. **Mirror into the ISO repo:** copy `vpinos-platform/apt/*` to
    `~/repos/vpinos/vpinos/config/archives/` and set the kernel in
    `config/package-lists/vpinos.list.chroot`. The ISO build refuses to run if
    these differ from `vpinos-platform`.
 6. **Release:** commit, push, then `git tag platform-v<PLATFORM_VERSION>` and
-   push the tag. One release holds all five debs. Publish it through deb-repo
+   push the tag. One release holds all seven debs. Publish it through deb-repo
    with `source_repo=vpinos/vpinos-packages` and that tag.
 7. **VPinOS installations:** Menu → Update VPinOS, then reboot. The old kernel stays in
    GRUB as a fallback.

@@ -284,6 +284,8 @@ def gpu_section():
             raw = f.read().strip()
             if raw == "nvidia":
                 mode = "nvidia (proprietary)"
+            elif raw == "nvidia-legacy":
+                mode = "nvidia-legacy (580)"
     except OSError:
         pass
     rows.append(("Configured mode", mode))
@@ -304,6 +306,15 @@ def gpu_section():
             # the module is actually loaded, but the installed package
             # version is just as accurate and always available).
             version = dpkg_version("nvidia-driver-libs") or "unknown"
+            # Both NVIDIA drivers bind as "nvidia"; vpinos-gpu-driver.sh
+            # records which one it loaded.
+            try:
+                with open("/run/vpinos/nvidia-loaded", encoding="utf-8") as f:
+                    if f.read().strip() == "nvidia-legacy":
+                        legacy = dpkg_version("vpinos-nvidia-legacy") or "unknown"
+                        version = f"{legacy} (legacy)"
+            except OSError:
+                pass
         else:
             # amdgpu/nouveau/i915 ship as part of the kernel itself, no
             # separate version number of their own -- the kernel release

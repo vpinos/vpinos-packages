@@ -2,9 +2,10 @@ name: Release package
 
 # One release per tag:
 #   core-vX.Y.Z      -> vpinos-core X.Y.Z (must match vpinos-core/debian/changelog)
-#   platform-vX.Y.Z  -> vpinos-platform X.Y.Z (amd64 + arm64) and
-#                       vpinos-nvidia-modules-<kernel> (amd64), built from
-#                       versions.env (PLATFORM_VERSION must be X.Y.Z)
+#   platform-vX.Y.Z  -> vpinos-platform + vpinos-kernel X.Y.Z (amd64 + arm64),
+#                       vpinos-nvidia-modules-<kernel>, vpinos-nvidia-legacy and
+#                       vpinos-nvidia-legacy-modules-<kernel> (amd64), built
+#                       from versions.env (PLATFORM_VERSION must be X.Y.Z)
 # The release gets the .debs + .deb.sha256 files, which is what deb-repo's
 # "Update apt repository" workflow publishes from (run it with
 # source_repo=vpinos/vpinos-packages and this tag).

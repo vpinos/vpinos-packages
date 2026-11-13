@@ -57,8 +57,14 @@ unbind_fbcon() {
 # script it's safe to run even when nothing else needs switching.
 load_uvm() {
     lsmod | grep -q '^nvidia_uvm ' && return 0
-    modprobe nvidia-uvm 2>/dev/null \
-        || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-uvm failed" >>/var/log/vpinos-menu.log
+    if [ "$(cat "$LOADED" 2>/dev/null)" = nvidia-legacy ]; then
+        # The legacy driver's own nvidia-uvm: `modprobe nvidia-uvm` would
+        # pick the current driver's, which refuses a 580 nvidia.ko.
+        legacy_insmod nvidia-uvm
+    else
+        modprobe nvidia-uvm 2>/dev/null \
+            || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-uvm failed" >>/var/log/vpinos-menu.log
+    fi
     if command -v nvidia-modprobe >/dev/null 2>&1; then
         nvidia-modprobe -u -c=0 2>/dev/null \
             || echo "$(date -Is): vpinos-gpu-driver: nvidia-modprobe -u -c=0 failed" >>/var/log/vpinos-menu.log
@@ -66,7 +72,56 @@ load_uvm() {
     return 0
 }
 
+# The NVIDIA legacy driver (580, Maxwell/Pascal/Volta) lives beside the
+# current one: same module names (nvidia, nvidia-drm, ...), so its
+# modules sit outside /lib/modules where depmod/udev never see them
+# (vpinos-nvidia-legacy-modules-<kernel>) and are insmod'ed by path.
+# Which of the two is loaded is recorded in $LOADED -- both show up as
+# "nvidia" in lsmod. /run is empty at every boot, exactly like the set of
+# loaded modules, and nothing else loads nvidia (it's blacklisted from
+# autoload), so the file can't go stale. See notes/nvidia-legacy-plan.md.
+LEGACY_MODULES=/usr/lib/vpinos/nvidia-legacy/modules/$(uname -r)
+LOADED=/run/vpinos/nvidia-loaded
+
+# insmod doesn't resolve dependencies the way modprobe does: load the
+# kernel's own (drm, drm_kms_helper, video, ...) by name first. The
+# nvidia* ones are loaded by the caller, in order.
+legacy_insmod() {
+    ko=$LEGACY_MODULES/$1.ko.xz
+    shift
+    for dep in $(modinfo -F depends "$ko" 2>/dev/null | tr ',' ' '); do
+        case "$dep" in
+            nvidia*) ;;
+            *) modprobe "$dep" 2>/dev/null || true ;;
+        esac
+    done
+    insmod "$ko" "$@" 2>/dev/null \
+        || echo "$(date -Is): vpinos-gpu-driver: insmod $(basename "$ko") $* failed" >>/var/log/vpinos-menu.log
+}
+
+# Unloads whichever NVIDIA driver is loaded, current or legacy. rmmod by
+# name works for both (modprobe -r can't resolve the legacy ones), in
+# reverse dependency order: nvidia.ko can't go while anything above it
+# still holds it.
+unload_nvidia() {
+    for m in nvidia_drm nvidia_modeset nvidia_uvm nvidia_peermem nvidia; do
+        lsmod | grep -q "^$m " && { rmmod "$m" 2>/dev/null \
+            || echo "$(date -Is): vpinos-gpu-driver: rmmod $m failed" >>/var/log/vpinos-menu.log; }
+    done
+    rm -f "$LOADED"
+}
+
 mode=$(cat /etc/vpinos/gpu-driver 2>/dev/null || true)
+
+# nvidia-legacy on a kernel its modules weren't built for (a release
+# that had to drop them): fall back to the open-source driver rather than
+# a black screen. The menu refuses to select it in that case; this covers
+# a kernel update after it was selected.
+if [ "$mode" = nvidia-legacy ] && [ ! -e "$LEGACY_MODULES/nvidia.ko.xz" ]; then
+    echo "$(date -Is): vpinos-gpu-driver: gpu-driver is nvidia-legacy but $LEGACY_MODULES has no modules -- using the open-source driver" >>/var/log/vpinos-menu.log
+    mode=default
+fi
+loaded=$(cat "$LOADED" 2>/dev/null || true)
 
 # Skip the whole unbind/modprobe dance entirely when the right driver
 # is already bound -- a real report, confirmed directly: doing it
@@ -90,8 +145,20 @@ mode=$(cat /etc/vpinos/gpu-driver 2>/dev/null || true)
 # that doesn't need to change, which sidesteps this permanently rather
 # than trying to add a matching rebind step.
 case "$mode" in
+    # The right one of the two NVIDIA drivers, not just "an nvidia":
+    # switching straight between nvidia and nvidia-legacy must reload.
+    # An empty marker counts as the current driver (a session that loaded
+    # it before the marker existed).
     nvidia)
-        if lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia '; then
+        if lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia ' \
+            && [ "${loaded:-nvidia}" = nvidia ]; then
+            load_uvm
+            exit 0
+        fi
+        ;;
+    nvidia-legacy)
+        if lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia ' \
+            && [ "$loaded" = nvidia-legacy ]; then
             load_uvm
             exit 0
         fi
@@ -123,6 +190,8 @@ case "$mode" in
         # fails every time and nvidia never actually gets the GPU.
         unbind_fbcon
         modprobe -r nouveau 2>/dev/null || true
+        # Coming from nvidia-legacy: its 580 modules have to go first.
+        lsmod | grep -q '^nvidia ' && unload_nvidia
         modprobe nvidia 2>/dev/null \
             || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia failed -- no NVIDIA hardware, or the precompiled module doesn't match this kernel?" >>/var/log/vpinos-menu.log
         # nvidia-drm, separately, with modeset=1: this is what actually
@@ -158,7 +227,41 @@ case "$mode" in
         # non-experimental requirement and is unaffected by any of this.
         modprobe nvidia-drm modeset=1 2>/dev/null \
             || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-drm modeset=1 failed" >>/var/log/vpinos-menu.log
-        lsmod | grep -q '^nvidia ' && load_uvm
+        if lsmod | grep -q '^nvidia '; then
+            mkdir -p "${LOADED%/*}"
+            echo nvidia > "$LOADED"
+            load_uvm
+        fi
+        ;;
+    nvidia-legacy)
+        # Same sequence as nvidia above (see its comments: unbind_fbcon
+        # first or nouveau never lets go), with the 580 modules insmod'ed
+        # by path. Options go on the insmod line: modprobe.d's
+        # `nvidia-drm modeset=1` (nvidia-wayland.conf) doesn't apply to
+        # insmod. NVreg_EnableGpuFirmware=0: Pascal and older have no GSP,
+        # and the 580 GSP firmware isn't shipped (no room in the ISO); on
+        # Turing and newer the closed module runs without it too.
+        unbind_fbcon
+        modprobe -r nouveau 2>/dev/null || true
+        lsmod | grep -q '^nvidia ' && unload_nvidia
+        legacy_insmod nvidia NVreg_EnableGpuFirmware=0
+        if lsmod | grep -q '^nvidia '; then
+            mkdir -p "${LOADED%/*}"
+            echo nvidia-legacy > "$LOADED"
+            legacy_insmod nvidia-modeset
+            legacy_insmod nvidia-drm modeset=1
+            # /dev/nvidiactl, /dev/nvidia0, /dev/nvidia-modeset. The
+            # libraries would ask nvidia-modprobe (setuid, version-
+            # independent, from the current driver) themselves; doing it
+            # here as root just takes that off the first launch.
+            if command -v nvidia-modprobe >/dev/null 2>&1; then
+                nvidia-modprobe -c=0 -m 2>/dev/null || true
+            fi
+            load_uvm
+        else
+            echo "$(date -Is): vpinos-gpu-driver: NVIDIA legacy nvidia.ko didn't load -- no supported NVIDIA card? (dmesg); back to the open-source driver" >>/var/log/vpinos-menu.log
+            modprobe nouveau 2>/dev/null || true
+        fi
         ;;
     *)
         # Default/anything unrecognized: plain open-source Mesa (NVK on
@@ -179,10 +282,10 @@ case "$mode" in
         # hardware IDs to a driver) -- it does not block an explicit
         # `modprobe nouveau` by exact name, which is exactly what this
         # does.
+        # unload_nvidia covers both NVIDIA drivers (rmmod by name, same
+        # reverse order as before).
         unbind_fbcon
-        modprobe -r nvidia-drm 2>/dev/null || true
-        modprobe -r nvidia-uvm 2>/dev/null || true
-        modprobe -r nvidia 2>/dev/null || true
+        unload_nvidia
         modprobe nouveau 2>/dev/null || true
         ;;
 esac
