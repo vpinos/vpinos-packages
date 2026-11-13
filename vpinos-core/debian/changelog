@@ -1,3 +1,18 @@
+vpinos-core (1.1.25) trixie; urgency=medium
+
+  * Launching from SSH works again: vpinos-launch run over SSH (for
+    example `vpinos-launch vpinball /opt/vpinball/VPinballX_BGFX -play
+    <table>`) stops the console on the cabinet for the run and starts it
+    again afterwards, returning to the menu. Since the switch to the
+    kmscon console, the console kept the screen and the program failed
+    to start.
+  * Programs no longer start too early after an earlier launch was
+    stopped: vpinos-launch now waits for its own Hyprland instead of
+    any leftover from a previous run, which could make VPinball fail
+    with "wayland not available".
+
+ -- Superhac <superhac007@gmail.com>  Fri, 13 Nov 2026 15:02:49 -0600
+
 vpinos-core (1.1.24) trixie; urgency=medium
 
   * New Setup > GPU Driver option: NVIDIA legacy, NVIDIA's 580 driver

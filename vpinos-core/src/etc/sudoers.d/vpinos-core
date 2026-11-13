@@ -57,6 +57,15 @@
 # unit, same narrow-scope reasoning as every other rule here.
 %sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-console-restart.sh
 
+# vpinos-launch run over SSH -- kmscon holds the display, so the console
+# is stopped for the run and started again afterwards. Stopping and
+# starting kmsconvt@tty1.service needs root. Scoped to this one
+# dedicated script with exactly these two arguments, so it can only
+# stop or start that one unit, same narrow-scope reasoning as every
+# other rule here.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-console-ssh.sh stop
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-console-ssh.sh start
+
 # vpinos-menu's Testing submenu's "SSH Password Authentication" option
 # (live CD only) -- writing an sshd_config.d drop-in and restarting
 # ssh.service both need root. Scoped to this one dedicated script, same

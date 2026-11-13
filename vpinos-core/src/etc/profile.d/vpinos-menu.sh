@@ -34,6 +34,15 @@ if [ -z "$SSH_CONNECTION" ] && [ -t 0 ]; then
     # audit check, and the docs together, so they can't drift out of
     # sync with each other.
     boot_mode=$(cat /etc/vpinos/boot-mode 2>/dev/null)
+    # vpinos-launch run over SSH stops the console for the run and
+    # starts it again afterwards (see the SSH block in vpinos-launch),
+    # leaving this marker so that one login comes back to the menu
+    # instead of starting the boot-on-startup program again.
+    skip_marker="/run/user/$(id -u)/vpinos-skip-boot-mode"
+    if [ -e "$skip_marker" ]; then
+        rm -f "$skip_marker"
+        boot_mode=menu
+    fi
     # kmscon has only just started when this runs at boot, and is still
     # bringing up the screens. kmscon-launch-gui gives it a fixed 0.2s to
     # let go of the display before Hyprland starts, which isn't enough

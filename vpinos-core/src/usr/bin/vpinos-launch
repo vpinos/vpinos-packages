@@ -45,11 +45,45 @@ shift
 # runs the command, and gives the screen back to the console once it
 # exits -- so this script re-runs itself under it, once
 # (VPINOS_KMSCON_GUI marks the inner run). On the getty@tty1 fallback
-# (fbcon) and over SSH, TERM isn't kmscon and nothing changes. sudo
+# (fbcon), TERM isn't kmscon and nothing changes; SSH is handled just
+# below. sudo
 # keeps TERM, so the installer's `sudo vpinos-launch` is covered too.
 if [ "$TERM" = kmscon ] && [ -z "$SSH_CONNECTION" ] && [ -z "$VPINOS_KMSCON_GUI" ]; then
     export VPINOS_KMSCON_GUI=1
     exec /usr/bin/kmscon-launch-gui "$0" "$client_name" "$@"
+fi
+
+# Over SSH, kmscon-launch-gui can't help: it talks to kmscon through
+# kmscon's own terminal, and an SSH session isn't one. kmscon keeps DRM
+# master on tty1, so a Hyprland started from SSH comes up without the
+# display and the client fails (VPX: "SDL_InitSubSystem(SDL_INIT_VIDEO)
+# failed: wayland not available"). Before kmscon, tty1 was getty on
+# fbcon, which holds nothing, and launching over SSH just worked. So
+# over SSH the console is stopped for the run and started again once
+# Hyprland has exited, through vpinos-console-ssh.sh (root via sudo;
+# its sudoers rules allow only "stop" and "start").
+#
+# The outer run waits for the inner one instead of exec'ing it, so it's
+# still around to start the console again. INT/HUP/TERM are trapped,
+# not ignored (an ignored signal would be inherited by Hyprland and the
+# client), so Ctrl+C or a dropped SSH connection still ends up there.
+# Stopping kmscon ends the cabinet's tty1 session (the menu, or VPinFE
+# if it was running there); starting it brings the menu back through
+# autologin. The marker tells /etc/profile.d/vpinos-menu.sh to skip the
+# boot-on-startup program for that one login, so the cabinet comes back
+# to the menu rather than, say, VPinFE. VPINOS_SSH_CONSOLE marks the
+# inner run. Nothing changes when kmscon isn't running (getty@tty1
+# fallback): the display is free then, as before.
+if [ -n "$SSH_CONNECTION" ] && [ -z "$VPINOS_SSH_CONSOLE" ] \
+    && systemctl is-active --quiet kmsconvt@tty1.service; then
+    export VPINOS_SSH_CONSOLE=1
+    sudo -n /usr/libexec/vpinos/vpinos-console-ssh.sh stop
+    trap ':' INT HUP TERM
+    rc=0
+    "$0" "$client_name" "$@" || rc=$?
+    : >"/run/user/$(id -u)/vpinos-skip-boot-mode" 2>/dev/null || true
+    sudo -n /usr/libexec/vpinos/vpinos-console-ssh.sh start
+    exit "$rc"
 fi
 
 # /run/user/<uid> rather than a custom root-owned path: for the normal
@@ -103,6 +137,59 @@ wait_for_glob() {
     return 1
 }
 
+# Waits for this run's own compositor, not just any Wayland socket or
+# Hyprland instance that happens to exist. A Hyprland stopped by the
+# kill in launch_client can leave its wayland-N.lock and its
+# hypr/<instance>/ directory behind in $runtime_dir. Matching those by
+# glob, the next run found the leftover wayland-1.lock at once and
+# started the client before the new Hyprland was listening: VPX failed
+# with "SDL_InitSubSystem(SDL_INIT_VIDEO) failed: wayland not
+# available" (seen launching over SSH, 2026-11-13, where the earlier
+# runs' leftovers had piled up). Leftover instance directories also
+# made hyprctl talk to a dead instance.
+#
+# wait_for_wayland_socket: libwayland holds an flock on wayland-N.lock
+# for as long as the compositor serving wayland-N is alive, so a lock
+# that `flock -n` can take is a leftover, and one it can't take belongs
+# to a live compositor. Checked with -e first because flock(1) would
+# create a missing file. Prints the socket name (wayland-N).
+wait_for_wayland_socket() {
+    i=0
+    while [ "$i" -lt 300 ]; do
+        for lock in "$runtime_dir"/wayland-*.lock; do
+            [ -e "$lock" ] && [ -S "${lock%.lock}" ] || continue
+            flock -n "$lock" true 2>/dev/null && continue
+            basename "$lock" .lock
+            return 0
+        done
+        sleep 0.1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+# find_hypr_instance: Hyprland writes hypr/<instance>/hyprland.lock
+# with its PID on the first line (and its Wayland socket name on the
+# second; checked on Hyprland 0.55.2). `exec` keeps this script's PID,
+# so the instance whose lock says $compositor_pid is the one this run
+# started. Waits for its IPC socket too, then prints the instance name
+# (HYPRLAND_INSTANCE_SIGNATURE). Same ~30s limit as wait_for_glob.
+find_hypr_instance() {
+    i=0
+    while [ "$i" -lt 300 ]; do
+        for lock in "$runtime_dir"/hypr/*/hyprland.lock; do
+            [ "$(head -n1 "$lock" 2>/dev/null)" = "$compositor_pid" ] || continue
+            dir=${lock%/hyprland.lock}
+            [ -S "$dir/.socket.sock" ] || continue
+            basename "$dir"
+            return 0
+        done
+        sleep 0.1
+        i=$((i + 1))
+    done
+    return 1
+}
+
 # Table Screen Rotation (portrait mode, set in vpinos-config): applies
 # the Table monitor's rotated `monitor = ...` line from
 # /etc/vpinos/table-rotation.conf to this Hyprland session, via hyprctl,
@@ -119,11 +206,10 @@ apply_table_rotation() {
     rotation_conf=/etc/vpinos/table-rotation.conf
     lines=$(sed -n 's/^[[:space:]]*monitor[[:space:]]*=[[:space:]]*//p' "$rotation_conf" 2>/dev/null | tr -d ' ')
     [ -n "$lines" ] || return 0
-    hypr_sock=$(wait_for_glob "$runtime_dir/hypr/*/.socket.sock") || {
+    HYPRLAND_INSTANCE_SIGNATURE=$(find_hypr_instance) || {
         echo "$(date -Is): vpinos-launch: timed out waiting for Hyprland's IPC socket -- Table Screen Rotation not applied" >>"$log_file"
         return 0
     }
-    HYPRLAND_INSTANCE_SIGNATURE=$(basename "$(dirname "$hypr_sock")")
     export HYPRLAND_INSTANCE_SIGNATURE
     echo "$lines" | while read -r value; do
         if hyprctl keyword monitor "$value" >/dev/null 2>&1; then
@@ -149,8 +235,7 @@ apply_table_rotation() {
 # the background, best-effort: on a timeout the window stays as it is.
 # Not for the installer, which keeps its own size.
 maximize_first_window() {
-    hypr_sock=$(wait_for_glob "$runtime_dir/hypr/*/.socket.sock") || return 0
-    HYPRLAND_INSTANCE_SIGNATURE=$(basename "$(dirname "$hypr_sock")")
+    HYPRLAND_INSTANCE_SIGNATURE=$(find_hypr_instance) || return 0
     export HYPRLAND_INSTANCE_SIGNATURE
     i=0
     while [ "$i" -lt 80 ]; do
@@ -229,12 +314,11 @@ launch_client() {
         export QT_XCB_GLYPH_CACHE_WORKAROUND=1
         display_label="DISPLAY=$DISPLAY"
     else
-        sock=$(wait_for_glob "$runtime_dir/wayland-*.lock") || {
+        WAYLAND_DISPLAY=$(wait_for_wayland_socket) || {
             echo "$(date -Is): vpinos-launch: timed out waiting for the compositor's Wayland socket" >>"$log_file"
             return 1
         }
         export WAYLAND_DISPLAY
-        WAYLAND_DISPLAY=$(basename "$sock" .lock)
         export SDL_VIDEODRIVER=wayland
         export GDK_BACKEND=wayland
         display_label="WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
