@@ -66,6 +66,17 @@ load_uvm() {
     return 0
 }
 
+# True when any PCI display controller (class 0x03xxxx) is NVIDIA's.
+has_nvidia_gpu() {
+    for dev in /sys/bus/pci/devices/*; do
+        [ "$(cat "$dev/vendor" 2>/dev/null)" = 0x10de ] || continue
+        case "$(cat "$dev/class" 2>/dev/null)" in
+            0x03*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 mode=$(cat /etc/vpinos/gpu-driver 2>/dev/null || true)
 
 # Skip the whole unbind/modprobe dance entirely when the right driver
@@ -109,7 +120,21 @@ case "$mode" in
     # ever rebind it -- the exact console-never-repaints-again bug this
     # early-exit was originally added to fix, just reintroduced for
     # every GPU driver except nvidia/nouveau.
-    *) ! lsmod | grep -q '^nvidia ' && ! lsmod | grep -q '^nvidia_drm ' && exit 0 ;;
+    #
+    # On NVIDIA hardware, nvidia not being loaded isn't enough: nouveau
+    # must actually be bound too. NVIDIA's own nvidia-kernel-support
+    # ships `blacklist nouveau` in /etc/modprobe.d/nvidia.conf (also in
+    # the initramfs), so on every NVIDIA cabinet nouveau never
+    # auto-loads at boot -- the console runs on efifb and there is no
+    # DRM device at all. Exiting here then skipped the explicit
+    # `modprobe nouveau` below, and Hyprland aborted with no GPU (exit
+    # 134 on every launch). Confirmed on a GTX 1080 (Pascal): with this
+    # check, default mode loads nouveau and NVK finds the card.
+    *)
+        if ! lsmod | grep -q '^nvidia ' && ! lsmod | grep -q '^nvidia_drm '; then
+            { ! has_nvidia_gpu || lsmod | grep -q '^nouveau '; } && exit 0
+        fi
+        ;;
 esac
 
 case "$mode" in
