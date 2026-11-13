@@ -181,8 +181,19 @@ case "$mode" in
         # parameter description) rather than mature, production-ready
         # behavior. `modeset=1` alone is NVIDIA's own well-documented,
         # non-experimental requirement and is unaffected by any of this.
-        modprobe nvidia-drm modeset=1 2>/dev/null \
-            || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-drm modeset=1 failed" >>/var/log/vpinos-menu.log
+        #
+        # fbdev=0 explicitly: since driver 570 nvidia-drm defaults to
+        # fbdev=1, so leaving it out no longer means "off". When nouveau
+        # drove the display before this switch (default mode loads it,
+        # see below), the fbdev console takeover hangs modprobe forever
+        # inside nvkms ("Idling display engine timed out", nvidia_drm
+        # stuck in "Loading", only a power cycle recovers). Confirmed on
+        # a GTX 1080 with 580.196.07: fbdev=Y hung twice, fbdev=0
+        # switched nouveau -> nvidia -> nouveau cleanly via
+        # vpinos-console-restart.sh. kmscon drives DRM directly, so the
+        # console doesn't need nvidia's fbdev.
+        modprobe nvidia-drm modeset=1 fbdev=0 2>/dev/null \
+            || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-drm modeset=1 fbdev=0 failed" >>/var/log/vpinos-menu.log
         lsmod | grep -q '^nvidia ' && load_uvm
         ;;
     *)

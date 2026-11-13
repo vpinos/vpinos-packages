@@ -23,7 +23,7 @@ case "$1" in
             #   vpinos-nvidia-no-autoload.conf  `blacklist nvidia` -- the
             #     driver is opt-in per cabinet (Setup > GPU Driver);
             #     vpinos-gpu-driver.sh loads it by name when chosen.
-            #   nvidia-wayland.conf  `options nvidia-drm modeset=1` --
+            #   nvidia-wayland.conf  `options nvidia-drm modeset=1 fbdev=0` --
             #     Hyprland needs DRM KMS from the NVIDIA driver.
             for f in vpinos-nvidia-no-autoload.conf nvidia-wayland.conf; do
                 if ! cmp -s "$SHARE/modprobe/$f" "/etc/modprobe.d/$f"; then
