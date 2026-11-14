@@ -151,6 +151,17 @@ def vpxtool_state() -> str:
     return "not installed"
 
 
+def nvidia_legacy_needed() -> bool:
+    """A Maxwell/Pascal/Volta card: only NVIDIA's legacy 580 driver runs it."""
+    return output("/usr/libexec/vpinos/vpinos-nvidia-legacy-setup.sh", "needed") == "legacy"
+
+
+def nvidia_legacy_state() -> str:
+    if output("/usr/libexec/vpinos/vpinos-nvidia-legacy-setup.sh", "status") == "installed":
+        return ""
+    return "not installed"
+
+
 def pinscape_cross_state() -> str:
     if not is_amd64():
         return "amd64 only"
@@ -559,6 +570,10 @@ class SetupScreen(MenuScreen):
         if settings_kept():
             items.append(Item("7", "Boot on startup", self.open(BootModeScreen), value=boot_mode(),
                               help="What starts when the cabinet is switched on."))
+        if nvidia_legacy_needed():
+            items.append(Item("8", "NVIDIA Legacy Driver", self.terminal("nvidia-legacy"),
+                              value=nvidia_legacy_state(),
+                              help="NVIDIA's 580 driver for GTX 900/10-series cards (switches on reboot)."))
         return items + [SEPARATOR, self.back_item()]
 
 
@@ -580,7 +595,7 @@ class GpuDriverScreen(ChoiceScreen):
     setter = "set-gpu-driver"
     choices = [
         ("default", "Default", "The open-source Mesa/NVK driver."),
-        ("nvidia", "NVIDIA proprietary", "NVIDIA's own driver (Turing/GTX 16 and newer; Secure Boot must be off)."),
+        ("nvidia", "NVIDIA proprietary", "NVIDIA's own driver (Secure Boot must be off). GTX 900/10 cards: install Setup > NVIDIA Legacy Driver first."),
     ]
 
     def current_value(self) -> str:

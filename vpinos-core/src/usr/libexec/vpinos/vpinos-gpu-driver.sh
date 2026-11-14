@@ -77,6 +77,37 @@ has_nvidia_gpu() {
     return 1
 }
 
+# The legacy 580 driver (Maxwell/Pascal/Volta, vpinos-nvidia-legacy-*,
+# see vpinos-nvidia-legacy-setup.sh) installs its libraries under their
+# own versioned names next to the image's 615 ones, but the four entry
+# points EGL, GBM and Vulkan look up by fixed path belong to the 615
+# packages. NVIDIA's libraries refuse a kernel module of another version,
+# so when the loaded module is the legacy one, bind-mount the legacy
+# entry points over them. Not environment variables: Hyprland has
+# cap_sys_nice, which puts it in secure-execution mode, where glibc,
+# libglvnd and libgbm ignore LD_LIBRARY_PATH, __EGL_VENDOR_LIBRARY_FILENAMES
+# and GBM_BACKENDS_PATH (confirmed: "Supported EGL client extensions: (0)",
+# then an abort in Aquamarine's loadEGLAPI). Binds leave the 615 packages'
+# files untouched and are gone on the next boot in default mode.
+# Idempotent: already-mounted targets are skipped.
+legacy_userspace() {
+    legacy=/usr/lib/vpinos-nvidia-legacy
+    [ -f "$legacy/version" ] || return 0
+    [ "$(cat /sys/module/nvidia/version 2>/dev/null)" = "$(cat "$legacy/version")" ] || return 0
+    libdir=/usr/lib/x86_64-linux-gnu
+    for pair in \
+        "$legacy/10_nvidia.json /usr/share/glvnd/egl_vendor.d/10_nvidia.json" \
+        "$legacy/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json" \
+        "$legacy/egl_external_platform.d /usr/share/egl/egl_external_platform.d" \
+        "$libdir/libnvidia-allocator.so.$(cat "$legacy/version") $libdir/gbm/nvidia-drm_gbm.so"; do
+        set -- $pair
+        [ -e "$2" ] || continue
+        mountpoint -q "$(readlink -f "$2")" && continue
+        mount --bind "$1" "$2" \
+            || echo "$(date -Is): vpinos-gpu-driver: bind $1 -> $2 failed" >>/var/log/vpinos-menu.log
+    done
+}
+
 mode=$(cat /etc/vpinos/gpu-driver 2>/dev/null || true)
 
 # Skip the whole unbind/modprobe dance entirely when the right driver
@@ -104,6 +135,7 @@ case "$mode" in
     nvidia)
         if lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia '; then
             load_uvm
+            legacy_userspace
             exit 0
         fi
         ;;
@@ -136,6 +168,22 @@ case "$mode" in
         fi
         ;;
 esac
+
+# Maxwell/Pascal/Volta (the legacy 580 driver, see
+# vpinos-nvidia-legacy-setup.sh): never swap nouveau and nvidia on a
+# running system. Confirmed on a GTX 1080: after one live swap the
+# display engine is left unusable for the next driver (nouveau
+# "base-0: timeout"; nvidia-modeset "Display engine push buffer channel
+# allocation failed", no DRM device) until a reboot. At boot, as
+# kmscon's ExecStartPre, neither driver is loaded yet, so the chosen one
+# loads cleanly; a mode change made later applies on the next reboot,
+# and the menu says so. Launches meanwhile stay on the loaded driver
+# (vpinos-launch doesn't force nvidia GBM/EGL without nvidia_drm).
+if lsmod | grep -qE '^(nouveau|nvidia) ' \
+    && [ "$(/usr/libexec/vpinos/vpinos-nvidia-legacy-setup.sh needed 2>/dev/null)" = legacy ]; then
+    echo "$(date -Is): vpinos-gpu-driver: gpu-driver is $mode, other driver loaded -- legacy NVIDIA GPU, switching on the next boot" >>/var/log/vpinos-menu.log
+    exit 0
+fi
 
 case "$mode" in
     nvidia)
@@ -195,6 +243,7 @@ case "$mode" in
         modprobe nvidia-drm modeset=1 fbdev=0 2>/dev/null \
             || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-drm modeset=1 fbdev=0 failed" >>/var/log/vpinos-menu.log
         lsmod | grep -q '^nvidia ' && load_uvm
+        legacy_userspace
         ;;
     *)
         # Default/anything unrecognized: plain open-source Mesa (NVK on

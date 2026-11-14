@@ -258,10 +258,21 @@ action_set_console_rotation() {
 # ("default": the open-source Mesa/NVK driver this image already ships
 # and uses everywhere else). Returns 3 when NVIDIA is refused.
 action_set_gpu_driver() {
+    gen=$(/usr/libexec/vpinos/vpinos-nvidia-legacy-setup.sh needed 2>/dev/null || echo no)
     case "$1" in
         default)
             echo "default" > /etc/vpinos/gpu-driver
             log "gpu-driver set to default"
+            # Maxwell/Pascal/Volta: swapping nvidia and nouveau while the
+            # system runs leaves the display engine unusable for the next
+            # driver (nouveau "base-0: timeout", then nvidia-modeset
+            # "Display engine push buffer channel allocation failed"),
+            # confirmed on a GTX 1080. Loading either one once at boot,
+            # before kmscon starts, is clean -- so switch on the reboot.
+            if [ "$gen" = legacy ] && lsmod | grep -q '^nvidia '; then
+                echo "Switching to the open-source driver on the next reboot."
+                return 0
+            fi
             if on_kmscon; then
                 echo "Switching to the open-source driver now."
                 restart_console gpu-driver
@@ -283,6 +294,36 @@ action_set_gpu_driver() {
                 echo "to use it. No change made."
                 return 3
             fi
+            # The image's driver (615, open module) only runs Turing and
+            # newer. Maxwell/Pascal/Volta need the legacy 580 driver,
+            # installed separately; Kepler and older have no driver here.
+            case "$gen" in
+                unsupported)
+                    log "gpu-driver nvidia refused -- GPU older than Maxwell"
+                    echo "This NVIDIA card is older than the GTX 900 series. No"
+                    echo "NVIDIA driver in VPinOS supports it; keep the default"
+                    echo "driver. No change made."
+                    return 3
+                    ;;
+                legacy)
+                    if [ "$(/usr/libexec/vpinos/vpinos-nvidia-legacy-setup.sh status)" != installed ]; then
+                        log "gpu-driver nvidia refused -- legacy driver not installed"
+                        echo "This card (GTX 900/10 series) needs NVIDIA's legacy driver."
+                        echo "Install it from Setup > NVIDIA Legacy Driver first."
+                        echo "No change made."
+                        return 3
+                    fi
+                    echo "nvidia" > /etc/vpinos/gpu-driver
+                    log "gpu-driver set to nvidia (legacy)"
+                    # See the default branch: switch at boot, not live.
+                    if lsmod | grep -q '^nvidia_drm '; then
+                        echo "NVIDIA legacy driver selected."
+                    else
+                        echo "Switching to the NVIDIA legacy driver on the next reboot."
+                    fi
+                    return 0
+                    ;;
+            esac
             echo "nvidia" > /etc/vpinos/gpu-driver
             log "gpu-driver set to nvidia"
             if on_kmscon; then
@@ -293,6 +334,44 @@ action_set_gpu_driver() {
             echo "Will use the NVIDIA proprietary driver on the next launch."
             ;;
         *) echo "usage: set-gpu-driver default|nvidia" >&2; return 2 ;;
+    esac
+}
+
+# Setup > NVIDIA Legacy Driver, only listed for Maxwell/Pascal/Volta
+# cards (see vpinos-nvidia-legacy-setup.sh): installs the legacy 580
+# driver, selects it, and offers the reboot that switches to it.
+action_nvidia_legacy() {
+    log "selected setup/nvidia-legacy"
+    setup=/usr/libexec/vpinos/vpinos-nvidia-legacy-setup.sh
+    if [ "$($setup status)" != installed ]; then
+        echo "GTX 900/10-series cards need NVIDIA's legacy 580 driver; the"
+        echo "built-in NVIDIA driver only supports GTX 16/RTX and newer."
+        echo "About 200 MB download, needs internet."
+        if ! is_installed; then
+            echo "Live USB: it will be lost on reboot."
+        fi
+        printf "Install it now? [y/N]: "
+        read -r confirm
+        case "$confirm" in
+            y|Y) ;;
+            *) return ;;
+        esac
+        sudo $setup install
+        rc=$?
+        log "vpinos-nvidia-legacy-setup.sh exited $rc"
+        if [ "$rc" != 0 ]; then
+            pause
+            return
+        fi
+    else
+        echo "The NVIDIA legacy driver is installed."
+    fi
+    action_set_gpu_driver nvidia || { pause; return; }
+    lsmod | grep -q '^nvidia_drm ' && { pause; return; }
+    printf "Reboot now? [y/N]: "
+    read -r confirm
+    case "$confirm" in
+        y|Y) sudo /usr/bin/systemctl reboot ;;
     esac
 }
 

@@ -224,6 +224,11 @@ setup_submenu() {
             [ -z "$bcur" ] && bcur=menu
             echo "7) Boot on startup: $bcur"
         fi
+        legacy=$(/usr/libexec/vpinos/vpinos-nvidia-legacy-setup.sh needed 2>/dev/null)
+        if [ "$legacy" = legacy ]; then
+            lstate=$(/usr/libexec/vpinos/vpinos-nvidia-legacy-setup.sh status 2>/dev/null)
+            echo "8) NVIDIA Legacy Driver (GTX 900/10): $lstate"
+        fi
         echo "q) Back"
         echo "=============================="
         choose
@@ -235,6 +240,7 @@ setup_submenu() {
             5) action_vpxconfig ;;
             6) action_vpinfe_map_controls ;;
             7) if settings_kept; then boot_mode_submenu; else invalid; fi ;;
+            8) if [ "$legacy" = legacy ]; then action_nvidia_legacy; else invalid; fi ;;
             q|Q) return ;;
             *) invalid ;;
         esac
