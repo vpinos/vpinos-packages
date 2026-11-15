@@ -1289,6 +1289,15 @@ def run_with_chrome(httpd, host, port):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=1112)
+    # The screen to open on, picked in vpinos-menu before Hyprland
+    # starts (the menu's console shows on every screen, so it's readable
+    # even when this tool's default screen is covered or tiny).
+    parser.add_argument("--monitor", default="")
+    args = parser.parse_args()
+
     ensure_instance_signature()
     # Re-apply whatever's already saved in hyprland.conf (role/mode
     # blocks included) before this tool ever reads monitor state, not
@@ -1327,14 +1336,17 @@ def main():
         sys.exit(1)
 
     ordered = sorted(monitors, key=lambda m: m["id"])
-    # Open on the saved Table monitor -- where every other VPinOS app
-    # opens -- not just whichever output Hyprland numbered 0 (a real
-    # report: Table on DP-2, but this tool always came up on HDMI-A-2,
-    # ID 0). First monitor only when no Table is saved yet, or the saved
-    # one isn't connected.
+    # Open on the screen picked in vpinos-menu (--monitor), else on the
+    # saved Table monitor -- where every other VPinOS app opens -- not
+    # just whichever output Hyprland numbered 0 (a real report: Table on
+    # DP-2, but this tool always came up on HDMI-A-2, ID 0). First
+    # monitor only when neither is given, or neither is connected.
     names = {mon["name"] for mon in ordered}
     table = next((n for n, role in parse_existing_roles().items() if role == "Table" and n in names), None)
-    menu_monitor = table or ordered[0]["name"]
+    picked = args.monitor if args.monitor in names else None
+    if args.monitor and not picked:
+        print(f"--monitor {args.monitor}: not connected, ignored", file=sys.stderr)
+    menu_monitor = picked or table or ordered[0]["name"]
     # Switch to the menu's own scratch workspace before Chrome ever
     # opens -- this runs before the server/Chrome are even started
     # below, so it's guaranteed to have already happened by the time
@@ -1345,11 +1357,6 @@ def main():
     for mon in ordered:
         print(f"  {mon['name']} (ID {mon['id']}): {mon.get('description', '?')}")
         print(f"      {geometry_of(mon)}")
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=1112)
-    args = parser.parse_args()
 
     app = App(ordered, menu_monitor)
     try:

@@ -199,9 +199,21 @@ action_reboot() {
 
 # --- Setup -------------------------------------------------------------
 
+# $1, optional: the screen to open on (a DRM connector name such as
+# DP-1, the same names Hyprland uses), picked in the Textual menu before
+# Hyprland starts. Without it vpinos-config opens on the saved Table.
 action_vpinos_config() {
-    log "selected setup/vpinos-config"
-    launch vpinos-config /usr/bin/vpinos-config
+    case "${1:-}" in
+        "")
+            log "selected setup/vpinos-config"
+            launch vpinos-config /usr/bin/vpinos-config ;;
+        *[!A-Za-z0-9-]*)
+            log "selected setup/vpinos-config, bad screen name: $1"
+            launch vpinos-config /usr/bin/vpinos-config ;;
+        *)
+            log "selected setup/vpinos-config on $1"
+            launch vpinos-config /usr/bin/vpinos-config --monitor "$1" ;;
+    esac
 }
 
 # nmtui is a plain ncurses TUI (NetworkManager's own) -- no display

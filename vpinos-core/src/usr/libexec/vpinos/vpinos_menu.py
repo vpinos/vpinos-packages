@@ -20,7 +20,9 @@ notifications.
 """
 
 import asyncio
+import glob
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -127,6 +129,52 @@ def console_rotation() -> str:
 
 def ssh_password_auth() -> str:
     return "on" if os.path.exists(SSH_TESTING_CONF) else "off"
+
+
+@dataclass
+class Monitor:
+    name: str    # DRM connector name (DP-1), the same name Hyprland uses
+    width: int
+    height: int
+    model: str   # from the EDID, "" when it has none
+
+
+def edid_model(edid: bytes) -> str:
+    """The monitor name descriptor (tag 0xFC) from an EDID base block."""
+    for start in (54, 72, 90, 108):
+        block = edid[start:start + 18]
+        if len(block) == 18 and block[:3] == b"\0\0\0" and block[3] == 0xFC:
+            return block[5:].decode("ascii", "replace").split("\n")[0].strip()
+    return ""
+
+
+def connected_monitors() -> list[Monitor]:
+    """Connected screens straight from DRM, so this works on the console
+    before Hyprland runs. Sorted by connector name; one entry per name
+    (two GPUs can both have a DP-1)."""
+    found: dict[str, Monitor] = {}
+    for path in sorted(glob.glob("/sys/class/drm/card*-*")):
+        if read(os.path.join(path, "status")) != "connected":
+            continue
+        name = os.path.basename(path).split("-", 1)[1]
+        mode = re.match(r"(\d+)x(\d+)", read(os.path.join(path, "modes")))
+        try:
+            with open(os.path.join(path, "edid"), "rb") as f:
+                model = edid_model(f.read(128))
+        except OSError:
+            model = ""
+        if name not in found:
+            found[name] = Monitor(name, int(mode[1]) if mode else 0, int(mode[2]) if mode else 0, model)
+    return sorted(found.values(), key=lambda m: m.name)
+
+
+def saved_table() -> str:
+    """The Table screen saved by vpinos-config (workspace 1 in its block
+    of /etc/vpinos/hyprland.conf), or ""."""
+    conf = read("/etc/vpinos/hyprland.conf")
+    block = re.search(r"# BEGIN vpinos-workspace-monitors(.*?)# END vpinos-workspace-monitors", conf, re.S)
+    found = re.search(r"^\s*workspace\s*=\s*1\s*,\s*monitor:([^\s,]+)", block[1], re.M) if block else None
+    return found[1] if found else ""
 
 
 def vr_installed() -> bool:
@@ -547,7 +595,7 @@ class SetupScreen(MenuScreen):
                  help="Turn this menu for a Table screen mounted in portrait."),
             Item("2", "GPU Driver", self.open(GpuDriverScreen), value=gpu_driver(),
                  help="Open-source Mesa/NVK, or the NVIDIA proprietary or legacy driver."),
-            Item("3", "VPinOS Configuration", self.terminal("vpinos-config"),
+            Item("3", "VPinOS Configuration", self.vpinos_config,
                  help="Screens, refresh rates, table rotation, VPinball and VPinFE options."),
             Item("4", "Network Settings", self.terminal("network"),
                  help="Wired and Wi-Fi connections, and the hostname."),
@@ -560,6 +608,60 @@ class SetupScreen(MenuScreen):
             items.append(Item("7", "Boot on startup", self.open(BootModeScreen), value=boot_mode(),
                               help="What starts when the cabinet is switched on."))
         return items + [SEPARATOR, self.back_item()]
+
+    def vpinos_config(self) -> None:
+        """With more than one screen, ask which one to open on first:
+        this menu shows on every screen, but vpinos-config opens on one,
+        and that one may be a small or partly covered DMD."""
+        monitors = connected_monitors()
+        if len(monitors) > 1:
+            self.app.push_screen(MonitorPickScreen(self.path, monitors))
+        else:
+            self.app.run_action_in_terminal(("vpinos-config",))
+
+
+class MonitorPickScreen(MenuScreen):
+    title_text = "VPinOS Configuration"
+    info_text = "Which screen should VPinOS Configuration open on? Pick one you can see all of."
+
+    def __init__(self, path: tuple[str, ...], monitors: list[Monitor]) -> None:
+        super().__init__(path)
+        self.monitors = monitors
+        self.table = saved_table()
+
+    def default(self) -> str:
+        """The saved Table, else the screen with the most pixels."""
+        names = [m.name for m in self.monitors]
+        if self.table in names:
+            return self.table
+        return max(self.monitors, key=lambda m: m.width * m.height).name
+
+    def items(self) -> list[Optional[Item]]:
+        items: list[Optional[Item]] = []
+        self.key_of: dict[str, str] = {}
+        for n, mon in enumerate(self.monitors[:9], 1):
+            self.key_of[mon.name] = str(n)
+            label = f"{mon.name}  {mon.model}" if mon.model else mon.name
+            value = f"{mon.width}x{mon.height}" if mon.width else ""
+            if mon.name == self.table:
+                value += "  Table"
+            items.append(Item(str(n), label, self.chooser(mon.name), value=value,
+                              help=f"Open VPinOS Configuration on {mon.name}."))
+        return items + [SEPARATOR, Item("q", "Cancel", self.action_back, help="Back to Setup.")]
+
+    def on_mount(self) -> None:
+        super().on_mount()
+        key = self.key_of.get(self.default())
+        if key:
+            menu = self.query_one("#menu", OptionList)
+            menu.highlighted = menu.get_option_index(key)
+
+    def chooser(self, name: str) -> Callable[[], None]:
+        def choose() -> None:
+            app = self.app
+            app.pop_screen()
+            app.run_action_in_terminal(("vpinos-config", name))
+        return choose
 
 
 class ConsoleRotationScreen(ChoiceScreen):

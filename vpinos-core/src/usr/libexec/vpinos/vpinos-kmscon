@@ -9,9 +9,22 @@
 # uses, in fbcon's numbering (see vpinos-console-rotation.sh),
 # translated to kmscon's names. kmscon only reads it at startup, so
 # vpinos-menu restarts this unit after a change
-# (vpinos-console-restart.sh). It rotates every screen kmscon draws on,
-# so --multi-monitor=largest keeps the menu on the largest screen only
-# (normally the Table) instead of sideways on the backglass and DMD too.
+# (vpinos-console-restart.sh).
+#
+# Which screens show the menu: kmscon 10.0.3 can't pick a screen by
+# name, only clone (every screen, grid sized to the smallest) or
+# largest (the screen with the most 16px text cells; the rest go dark).
+# Unrotated: clone, so the whole menu is on the Table even when the DMD
+# is a small or partly covered panel (two reports, including a DMD
+# behind a wood cutout). Rotated: --rotate turns every screen kmscon
+# draws on, so largest keeps the sideways menu off the backglass and
+# DMD.
+#
+# --no-use-original-mode: drive each screen at its EDID preferred mode,
+# not whatever mode it already had when kmscon started. A screen the
+# firmware left dark has no "original" mode (0x0), so it either failed
+# to come up or lost the largest comparison to a smaller screen that
+# was lit -- a 1024x768 DMD won over 1080p screens.
 #
 # --grab-rotate-*= (empty disables a grab; 10.0.3 has no --no-grab-*):
 # kmscon's Super+Plus/Minus would otherwise rotate the console live,
@@ -31,6 +44,13 @@ case "$(cat /etc/vpinos/console-rotation 2>/dev/null)" in
     *) rotate=normal ;;
 esac
 
+if [ "$rotate" = normal ]; then
+    multi=clone
+else
+    multi=largest
+fi
+
 exec /usr/bin/kmscon --vt="$tty" --no-switchvt --rotate="$rotate" \
-    --multi-monitor=largest --grab-rotate-cw= --grab-rotate-ccw= \
+    --multi-monitor="$multi" --no-use-original-mode \
+    --grab-rotate-cw= --grab-rotate-ccw= \
     --session-max=1 --login -- /bin/login -p -f vpinos

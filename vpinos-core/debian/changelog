@@ -1,3 +1,19 @@
+vpinos-core (1.1.27) trixie; urgency=medium
+
+  * The menu shows on every screen of a cabinet, not only on one that
+    can be partly hidden, such as a DMD behind a wood cutout, so it's
+    no longer necessary to unplug screens to see it. Every screen starts
+    at its own preferred resolution. On screens of different sizes the
+    menu is sized to fit the smallest one, so larger screens show it
+    centred. With Console Rotation set, the menu still shows on one
+    screen only.
+  * VPinOS Configuration asks which screen to open on when more than
+    one is connected, listing each with its name and resolution. The
+    saved Table screen is preselected, or the largest screen before one
+    is saved. Identify Screens returns to the chosen screen.
+
+ -- Superhac <superhac007@gmail.com>  Sun, 15 Nov 2026 17:36:10 -0600
+
 vpinos-core (1.1.26) trixie; urgency=medium
 
   * NVIDIA cards work in the default (open-source) GPU driver mode
