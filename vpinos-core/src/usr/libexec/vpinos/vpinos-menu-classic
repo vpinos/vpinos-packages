@@ -287,14 +287,20 @@ testing_submenu() {
             sstate=" (not installed)"
         fi
         echo "2) SSF Speaker Test$sstate"
+        if dof_test_table_installed; then
+            dstate=""
+        else
+            dstate=" (not installed)"
+        fi
+        echo "3) DOF Test$dstate"
         if ! is_installed; then
-            echo "3) VPinFE"
+            echo "4) VPinFE"
             if [ -e /etc/ssh/sshd_config.d/99-vpinos-live-testing.conf ]; then
                 sshacur=on
             else
                 sshacur=off
             fi
-            echo "4) SSH Password Authentication: $sshacur"
+            echo "5) SSH Password Authentication: $sshacur"
         fi
         echo "q) Back"
         echo "=============================="
@@ -302,8 +308,9 @@ testing_submenu() {
         case "$choice" in
             1) action_example_table ;;
             2) action_ssf_test_table ;;
-            3) if is_installed; then invalid; else action_testing_vpinfe; fi ;;
-            4) if is_installed; then invalid; else ssh_password_auth_submenu; fi ;;
+            3) action_dof_test_table ;;
+            4) if is_installed; then invalid; else action_testing_vpinfe; fi ;;
+            5) if is_installed; then invalid; else ssh_password_auth_submenu; fi ;;
             q|Q) return ;;
             *) invalid ;;
         esac

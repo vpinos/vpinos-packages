@@ -1,3 +1,15 @@
+vpinos-core (1.1.29) trixie; urgency=medium
+
+  * Testing has a new item, DOF Test: a table for testing DirectOutput
+    Framework (DOF) toys one at a time. The flipper buttons step through
+    DOF events E901 to E990, only the selected one is on, and the
+    backglass shows its number. It isn't installed by default: the first
+    time it's picked, the menu offers to install it (about 8 MB, needs
+    internet). On the live session, VPinFE and SSH Password
+    Authentication move to 4 and 5 in Testing.
+
+ -- Superhac <superhac007@gmail.com>  Tue, 17 Nov 2026 07:52:33 -0600
+
 vpinos-core (1.1.28) trixie; urgency=medium
 
   * Testing has a new item, SSF Speaker Test: a table for checking that a
