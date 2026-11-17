@@ -115,6 +115,10 @@ pinscape_cross_installed() {
     [ "$(/usr/libexec/vpinos/vpinos-pinscape-cross-setup.sh status 2>/dev/null)" = installed ]
 }
 
+ssf_test_table_installed() {
+    [ "$(/usr/libexec/vpinos/vpinos-ssf-test-table-setup.sh status 2>/dev/null)" = installed ]
+}
+
 # Runs vpinos-launch and logs how it ended, the same two log lines every
 # graphical item has always written.
 launch() {
@@ -122,23 +126,38 @@ launch() {
     log "vpinos-launch exited $?"
 }
 
-# Launches the bundled example table from a per-user copy instead of
-# /opt/vpinball/assets directly. VPX writes its compressed-texture cache
-# next to the table (<table dir>/cache/<table>/), and /opt/vpinball is
-# root-owned (the vpinball package's), so launched from there VPX logged
-# "Failed to create Cache folder ... (Permission denied)" and ran with
-# texture compression off. The copy lives somewhere vpinos can write,
-# so the cache works normally -- without changing any permissions in
-# /opt and without affecting any other table. A copy, not a symlink:
-# not confirmed whether VPX resolves a symlink back to /opt when it
-# picks the cache folder.
+# Tables that come in a package (root-owned, under /opt or /usr/share)
+# are launched from a per-user copy instead. VPX writes its
+# compressed-texture cache next to the table (<table dir>/cache/<table>/),
+# so launched from a root-owned directory VPX logged "Failed to create
+# Cache folder ... (Permission denied)" and ran with texture compression
+# off. The copy lives somewhere vpinos can write, so the cache works
+# normally -- without changing any permissions in the package's files and
+# without affecting any other table. A copy, not a symlink: not confirmed
+# whether VPX resolves a symlink back to the original when it picks the
+# cache folder.
 #
-# Newer vpinball builds ship the table in the expanded format, a
-# directory (exampleTable.vpz), instead of exampleTable.vpx; older ones
-# still have the .vpx, so whichever is there is used. A directory's
-# mtime doesn't change when the files in it do, so the copy is
-# refreshed (with its cache) whenever the installed vpinball version
-# differs from the one it was copied from, not by comparing dates.
+# copy_table <src> <dir> <package>: copies <src> (a table file, or a
+# table folder with everything that sits next to the .vpx) into <dir>,
+# unless <dir> already holds a copy made from the installed version of
+# <package>. A directory's mtime doesn't change when the files in it do,
+# so the copy is refreshed (with its cache) whenever the package's
+# version differs from the one it was copied from, not by comparing
+# dates. Returns non-zero if the copy couldn't be made.
+copy_table() {
+    stamp="$2/.$3-version"
+    version=$(dpkg-query -W -f='${Version}' "$3" 2>/dev/null)
+    if [ -e "$2/${1##*/}" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$version" ]; then
+        return 0
+    fi
+    rm -rf "$2"
+    mkdir -p "$2" && cp -R "$1" "$2/" && echo "$version" >"$stamp"
+}
+
+# The bundled example table, from a per-user copy (copy_table). Newer
+# vpinball builds ship it in the expanded format, a directory
+# (exampleTable.vpz), instead of exampleTable.vpx; older ones still have
+# the .vpx, so whichever is there is used.
 launch_example_table() {
     src=/opt/vpinball/assets/exampleTable.vpz
     [ -e "$src" ] || src=/opt/vpinball/assets/exampleTable.vpx
@@ -150,16 +169,9 @@ launch_example_table() {
     fi
     table=${src##*/}
     dir="$HOME/.local/share/vpinos/exampleTable"
-    stamp="$dir/.vpinball-version"
-    version=$(dpkg-query -W -f='${Version}' vpinball 2>/dev/null)
-    if [ ! -e "$dir/$table" ] || [ "$(cat "$stamp" 2>/dev/null)" != "$version" ]; then
-        rm -rf "$dir"
-        if mkdir -p "$dir" && cp -R "$src" "$dir/"; then
-            echo "$version" >"$stamp"
-        else
-            log "couldn't copy the example table, launching it from /opt"
-            dir=/opt/vpinball/assets
-        fi
+    if ! copy_table "$src" "$dir" vpinball; then
+        log "couldn't copy the example table, launching it from /opt"
+        dir=/opt/vpinball/assets
     fi
     launch vpinball /opt/vpinball/VPinballX_BGFX -play "$dir/$table"
 }
@@ -360,6 +372,43 @@ action_set_boot_mode() {
 action_example_table() {
     log "selected testing/vpinball-example-table"
     launch_example_table
+}
+
+# Not in the image (see vpinos-ssf-test-table-setup.sh), so the first use
+# offers to install it, like VPX Editor. Then it plays like the example
+# table: from a per-user copy (copy_table) of the whole table folder, so
+# the backglass (.directb2s) and music/ stay next to the .vpx, where the
+# table looks for them.
+action_ssf_test_table() {
+    log "selected testing/ssf-speaker-test"
+    if ! ssf_test_table_installed; then
+        echo "The SSF Speaker Test table isn't installed (~9 MB download, needs internet)."
+        if ! is_installed; then
+            echo "Live USB: it will be lost on reboot."
+        fi
+        printf "Install it now? [y/N]: "
+        read -r confirm
+        case "$confirm" in
+            y|Y) ;;
+            *) return ;;
+        esac
+        # Runs straight in this tty, like VR > Setup -- no Hyprland
+        # needed, and the apt output stays visible.
+        sudo /usr/libexec/vpinos/vpinos-ssf-test-table-setup.sh install
+        rc=$?
+        log "vpinos-ssf-test-table-setup.sh exited $rc"
+        if [ "$rc" != 0 ]; then
+            pause
+            return
+        fi
+    fi
+    src=/usr/share/vpx-ssf-test-table/SSF_Speaker_Test
+    dir="$HOME/.local/share/vpinos/ssfTestTable"
+    if ! copy_table "$src" "$dir" vpx-ssf-test-table; then
+        log "couldn't copy the SSF Speaker Test table, launching it from /usr/share"
+        dir=/usr/share/vpx-ssf-test-table
+    fi
+    launch vpinball /opt/vpinball/VPinballX_BGFX -play "$dir/SSF_Speaker_Test/SSF_Speaker_Test.vpx"
 }
 
 action_testing_vpinfe() {

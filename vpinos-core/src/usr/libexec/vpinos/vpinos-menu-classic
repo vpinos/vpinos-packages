@@ -281,22 +281,29 @@ testing_submenu() {
         echo "           Testing"
         echo "=============================="
         echo "1) Launch VPinball Example Table"
+        if ssf_test_table_installed; then
+            sstate=""
+        else
+            sstate=" (not installed)"
+        fi
+        echo "2) SSF Speaker Test$sstate"
         if ! is_installed; then
-            echo "2) VPinFE"
+            echo "3) VPinFE"
             if [ -e /etc/ssh/sshd_config.d/99-vpinos-live-testing.conf ]; then
                 sshacur=on
             else
                 sshacur=off
             fi
-            echo "3) SSH Password Authentication: $sshacur"
+            echo "4) SSH Password Authentication: $sshacur"
         fi
         echo "q) Back"
         echo "=============================="
         choose
         case "$choice" in
             1) action_example_table ;;
-            2) if is_installed; then invalid; else action_testing_vpinfe; fi ;;
-            3) if is_installed; then invalid; else ssh_password_auth_submenu; fi ;;
+            2) action_ssf_test_table ;;
+            3) if is_installed; then invalid; else action_testing_vpinfe; fi ;;
+            4) if is_installed; then invalid; else ssh_password_auth_submenu; fi ;;
             q|Q) return ;;
             *) invalid ;;
         esac

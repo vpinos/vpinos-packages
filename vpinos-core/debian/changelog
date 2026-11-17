@@ -1,3 +1,15 @@
+vpinos-core (1.1.28) trixie; urgency=medium
+
+  * Testing has a new item, SSF Speaker Test: a table for checking that a
+    cabinet's 7.1 Surround Sound Feedback (SSF) speakers are wired and
+    configured correctly. It plays a test sound on one speaker at a time
+    and shows the active speaker on the backglass. It isn't installed by
+    default: the first time it's picked, the menu offers to install it
+    (about 9 MB, needs internet). On the live session, VPinFE and SSH
+    Password Authentication move to 3 and 4 in Testing.
+
+ -- Superhac <superhac007@gmail.com>  Tue, 17 Nov 2026 06:25:09 -0600
+
 vpinos-core (1.1.27) trixie; urgency=medium
 
   * The menu shows on every screen of a cabinet, not only on one that

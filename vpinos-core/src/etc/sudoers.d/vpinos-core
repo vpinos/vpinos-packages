@@ -101,6 +101,12 @@
 # dedicated script, which only ever installs the pinscape-cross package.
 %sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-pinscape-cross-setup.sh
 
+# vpinos-menu's Testing > SSF Speaker Test option, when the table isn't
+# installed yet -- same as VPX Editor's rule above: scoped to this one
+# dedicated script, which only ever installs the vpx-ssf-test-table
+# package.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-ssf-test-table-setup.sh
+
 # vpinos-menu's Tools > "Reset Saved Settings" option (live USB with
 # saved settings only) -- removing the saved-settings partition's
 # persistence.conf needs root. Scoped to this one script's reset, which

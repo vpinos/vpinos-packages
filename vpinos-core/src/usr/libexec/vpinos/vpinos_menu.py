@@ -207,6 +207,12 @@ def pinscape_cross_state() -> str:
     return "not installed"
 
 
+def ssf_test_table_state() -> str:
+    if output("/usr/libexec/vpinos/vpinos-ssf-test-table-setup.sh", "status") == "installed":
+        return ""
+    return "not installed"
+
+
 def version() -> str:
     """vpinos-core's version is the VPinOS version (it moves with every
     update); os-release's VERSION_ID only names the ISO the system was
@@ -724,11 +730,13 @@ class TestingScreen(MenuScreen):
         items: list[Optional[Item]] = [
             Item("1", "Launch VPinball Example Table", self.terminal("example-table"),
                  help="Play VPinball's bundled example table."),
+            Item("2", "SSF Speaker Test", self.terminal("ssf-test-table"), value=ssf_test_table_state(),
+                 help="Check a 7.1 SSF cabinet's speakers one at a time (installs on first use, ~9 MB)."),
         ]
         if not is_installed():
             items += [
-                Item("2", "VPinFE", self.terminal("testing-vpinfe"), help="Start the VPinFE frontend."),
-                Item("3", "SSH Password Authentication", self.open(SshPasswordAuthScreen),
+                Item("3", "VPinFE", self.terminal("testing-vpinfe"), help="Start the VPinFE frontend."),
+                Item("4", "SSH Password Authentication", self.open(SshPasswordAuthScreen),
                      value=ssh_password_auth(), help="Allow SSH logins with a password while testing."),
             ]
         return items + [SEPARATOR, self.back_item()]
