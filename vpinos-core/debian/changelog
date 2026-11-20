@@ -1,3 +1,15 @@
+vpinos-core (1.1.31) trixie; urgency=medium
+
+  * With an NVIDIA driver (NVIDIA proprietary or NVIDIA legacy), the menu
+    no longer drops to a low resolution after a program exits. The
+    computer's built-in startup display was left running beside the
+    NVIDIA driver, and the menu treated it as an extra screen and shrank
+    to fit it. VPinOS now turns it off once the NVIDIA driver is loaded.
+    The other text consoles (Ctrl+Alt+F2 and up) are blank with these
+    drivers. The Default driver is unchanged.
+
+ -- Superhac <superhac007@gmail.com>  Fri, 20 Nov 2026 07:19:32 -0600
+
 vpinos-core (1.1.30) trixie; urgency=medium
 
   * Ready for Visual Pinball 10.9, which keeps its settings in a new

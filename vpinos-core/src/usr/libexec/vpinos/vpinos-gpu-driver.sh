@@ -45,6 +45,34 @@ unbind_fbcon() {
     return 0
 }
 
+# Removes the firmware's boot framebuffer (efifb "EFI VGA", vesafb, or
+# simple-framebuffer) once nvidia-drm drives the card. A DRM driver
+# normally removes it as it loads (nouveau and amdgpu do), but
+# nvidia-drm only does so when its own fbdev emulation is on, and we
+# load it with fbdev=0 (see the nvidia branch). With fbdev=0 the
+# firmware framebuffer stayed behind, and kmscon picked it up as an
+# extra screen when it took the display back from Hyprland ("Display
+# [fbdev] ... EFI VGA" in its journal). In clone mode the text grid is
+# sized to the smallest screen, so the menu dropped to the firmware's
+# low resolution after every launch. Confirmed on a GTX 1650 in nvidia
+# mode: unbinding efi-framebuffer.0 restored the menu at once, and it
+# stayed full size across later launches.
+# Only called with nvidia_drm loaded, so there is always a real DRM
+# device left. Side effect: no fbcon in nvidia modes (tty2+, and the
+# getty@tty1 fallback if kmscon fails, have nothing to draw on), the
+# same as having no framebuffer console at all.
+remove_firmware_fb() {
+    lsmod | grep -q '^nvidia_drm ' || return 0
+    for drv in efi-framebuffer vesa-framebuffer simple-framebuffer; do
+        for dev in /sys/bus/platform/drivers/$drv/*-framebuffer.*; do
+            [ -e "$dev" ] || continue
+            echo "${dev##*/}" > "/sys/bus/platform/drivers/$drv/unbind" 2>/dev/null \
+                || echo "$(date -Is): vpinos-gpu-driver: unbinding ${dev##*/} failed" >>/var/log/vpinos-menu.log
+        done
+    done
+    return 0
+}
+
 # nvidia-uvm: CUDA's unified-memory module. Nothing graphical needs it,
 # but CUDA does -- without it libcuda's cuInit fails with "unknown error
 # (999)", confirmed on a real Intel+RTX 5060 laptop, so WiVRn (VR
@@ -163,6 +191,7 @@ case "$mode" in
     nvidia)
         if lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia ' \
             && [ "${loaded:-nvidia}" = nvidia ]; then
+            remove_firmware_fb
             load_uvm
             exit 0
         fi
@@ -170,6 +199,7 @@ case "$mode" in
     nvidia-legacy)
         if lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia ' \
             && [ "$loaded" = nvidia-legacy ]; then
+            remove_firmware_fb
             load_uvm
             exit 0
         fi
@@ -284,6 +314,7 @@ case "$mode" in
         if lsmod | grep -q '^nvidia '; then
             mkdir -p "${LOADED%/*}"
             echo nvidia > "$LOADED"
+            remove_firmware_fb
             load_uvm
         fi
         ;;
@@ -312,6 +343,7 @@ case "$mode" in
             if command -v nvidia-modprobe >/dev/null 2>&1; then
                 nvidia-modprobe -c=0 -m 2>/dev/null || true
             fi
+            remove_firmware_fb
             load_uvm
         else
             echo "$(date -Is): vpinos-gpu-driver: NVIDIA legacy nvidia.ko didn't load -- no supported NVIDIA card? (dmesg); back to the open-source driver" >>/var/log/vpinos-menu.log
