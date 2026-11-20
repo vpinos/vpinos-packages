@@ -114,7 +114,24 @@ TABLE_ROTATION_HEADER = (
 )
 
 VPX_BINARY = "/opt/vpinball/VPinballX_BGFX"
-VPX_INI_PATH = os.path.expanduser("~/.local/share/VPinballX/10.8/VPinballX.ini")
+VPX_PREFDIR_HELPER = "/usr/libexec/vpinos/vpinos-vpx-prefdir"
+
+
+def vpx_ini_path():
+    # VPX keeps its settings in a folder per minor version (10.8, 10.9,
+    # ...). The helper works out which one the installed vpinball uses.
+    # It never creates the folder: see ensure_vpinballx_ini().
+    try:
+        folder = subprocess.run([VPX_PREFDIR_HELPER], capture_output=True,
+                                text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        folder = ""
+    if not folder:
+        folder = os.path.expanduser("~/.local/share/VPinballX/10.9")
+    return os.path.join(folder, "VPinballX.ini")
+
+
+VPX_INI_PATH = vpx_ini_path()
 
 # Cabinet-only extras (only meaningful once VPinball Mode = Cabinet --
 # see VPinballX.ini's own comments): value, display name, description.
@@ -549,9 +566,11 @@ def ensure_vpinballx_ini():
     # nothing to edit until it's been run at least once. `-h` (just
     # prints help and exits) is enough to trigger that write without
     # actually opening a table or a window.
+    # Don't create the folder here: when VPX's minor version changes
+    # (10.8 -> 10.9), VPX only copies the old settings into the new folder
+    # if that folder doesn't exist yet. Leave it to VPX.
     if os.path.exists(VPX_INI_PATH):
         return
-    os.makedirs(os.path.dirname(VPX_INI_PATH), exist_ok=True)
     subprocess.run([VPX_BINARY, "-h"], capture_output=True, text=True, check=False)
     if not os.path.exists(VPX_INI_PATH):
         raise RuntimeError(f"{VPX_INI_PATH} still missing after running {VPX_BINARY} -h")

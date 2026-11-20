@@ -26,7 +26,8 @@ WIVRN_LOG=/var/log/vpinos-wivrn.log
 # Start turns it on; Stop puts back whatever it was before Start,
 # saved here ("unset" if the key didn't exist). Only saved when nothing
 # is saved yet, so a second Start can't overwrite the original with 0.
-VPX_INI="$HOME/.local/share/VPinballX/10.8/VPinballX.ini"
+# The folder depends on VPX's minor version (10.8, 10.9, ...), see vpinos-vpx-prefdir.
+VPX_INI="$(/usr/libexec/vpinos/vpinos-vpx-prefdir)/VPinballX.ini"
 VR_STATE="$HOME/.local/state/vpinos/vr-asktoturnon"
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"

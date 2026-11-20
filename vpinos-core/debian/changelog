@@ -1,3 +1,15 @@
+vpinos-core (1.1.30) trixie; urgency=medium
+
+  * Ready for Visual Pinball 10.9, which keeps its settings in a new
+    folder, ~/.local/share/VPinballX/10.9 instead of 10.8. VPinOS
+    Configuration and the VR on/off switch now use the folder of the
+    Visual Pinball version that's installed, so they keep working before
+    and after the update. The first time 10.9 runs, it copies the 10.8
+    settings into its new folder. VPinOS Configuration no longer creates
+    the folder itself, which would have stopped that copy.
+
+ -- Superhac <superhac007@gmail.com>  Fri, 20 Nov 2026 05:54:01 -0600
+
 vpinos-core (1.1.29) trixie; urgency=medium
 
   * Testing has a new item, DOF Test: a table for testing DirectOutput
