@@ -1,3 +1,13 @@
+vpinos-core (1.1.33) trixie; urgency=medium
+
+  * Install VPinOS asks which screen to open the installer on when more
+    than one screen is connected, the same way VPinOS Configuration
+    does. It highlights the largest screen, or the saved Table. Pick one
+    you can see all of: before, the installer could open on a DMD or a
+    covered backglass.
+
+ -- Superhac <superhac007@gmail.com>  Tue, 24 Nov 2026 09:35:59 -0600
+
 vpinos-core (1.1.32) trixie; urgency=medium
 
   * Setup has a new item, VPinFE 3.0 Beta, for trying the VPinFE 3.0

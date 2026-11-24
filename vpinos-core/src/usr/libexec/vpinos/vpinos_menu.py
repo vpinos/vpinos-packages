@@ -558,7 +558,7 @@ class MainScreen(MenuScreen):
             items += [
                 Item("2", "Testing", self.open(TestingScreen), help="Try the cabinet out, VPinFE included."),
                 Item("3", "VR", self.open(VrScreen), help="Play in a VR headset over WiVRn."),
-                Item("4", "Install VPinOS", self.terminal("install"),
+                Item("4", "Install VPinOS", self.install,
                      help="Install VPinOS from this USB stick to a disk."),
                 Item("5", "Tools", self.open(ToolsScreen), help="System info, VPX Editor, vpxtool and Pinscape-Cross."),
             ]
@@ -569,6 +569,15 @@ class MainScreen(MenuScreen):
             Item("r", "Reboot", self.confirm("Reboot now?", "reboot"), help="Restart the cabinet."),
         ]
         return items
+
+    def install(self) -> None:
+        """With more than one screen, ask which one the installer opens
+        on first, the same as VPinOS Configuration."""
+        monitors = connected_monitors()
+        if len(monitors) > 1:
+            self.app.push_screen(InstallMonitorPickScreen(self.path, monitors))
+        else:
+            self.app.run_action_in_terminal(("install",))
 
     def info(self) -> str:
         """On a live session, whether its settings survive a reboot."""
@@ -640,8 +649,13 @@ class SetupScreen(MenuScreen):
 
 
 class MonitorPickScreen(MenuScreen):
+    """Which screen a windowed program opens on. The picked connector name
+    is passed to `action` in vpinos-menu-actions."""
     title_text = "VPinOS Configuration"
     info_text = "Which screen should VPinOS Configuration open on? Pick one you can see all of."
+    action = "vpinos-config"
+    program = "VPinOS Configuration"
+    back_help = "Back to Setup."
 
     def __init__(self, path: tuple[str, ...], monitors: list[Monitor]) -> None:
         super().__init__(path)
@@ -665,8 +679,8 @@ class MonitorPickScreen(MenuScreen):
             if mon.name == self.table:
                 value += "  Table"
             items.append(Item(str(n), label, self.chooser(mon.name), value=value,
-                              help=f"Open VPinOS Configuration on {mon.name}."))
-        return items + [SEPARATOR, Item("q", "Cancel", self.action_back, help="Back to Setup.")]
+                              help=f"Open {self.program} on {mon.name}."))
+        return items + [SEPARATOR, Item("q", "Cancel", self.action_back, help=self.back_help)]
 
     def on_mount(self) -> None:
         super().on_mount()
@@ -679,8 +693,16 @@ class MonitorPickScreen(MenuScreen):
         def choose() -> None:
             app = self.app
             app.pop_screen()
-            app.run_action_in_terminal(("vpinos-config", name))
+            app.run_action_in_terminal((self.action, name))
         return choose
+
+
+class InstallMonitorPickScreen(MonitorPickScreen):
+    title_text = "Install VPinOS"
+    info_text = "Which screen should the installer open on? Pick one you can see all of."
+    action = "install"
+    program = "the installer"
+    back_help = "Back to the main menu."
 
 
 class ConsoleRotationScreen(ChoiceScreen):

@@ -33,10 +33,29 @@
 # WAYLAND_DISPLAY -- the installer's exact setup, for an app that only
 # works properly under X11.
 #   e.g. vpinos-launch x11 /usr/bin/some-x11-app
+#
+# --monitor <name>, before <name>: once the client's first window maps,
+# move it to that screen (a connector name such as DP-1, the same names
+# Hyprland uses) and centre it there. For the installer, whose screen is
+# picked in vpinos-menu: vpinos-config takes the same pick as its own
+# --monitor and moves itself, but Calamares can't.
+#   e.g. vpinos-launch --monitor DP-2 installer /usr/bin/calamares
 
 set -e
 
-client_name="${1:?usage: vpinos-launch <name> <command> [args...]}"
+monitor=""
+if [ "${1:-}" = --monitor ]; then
+    monitor="${2:-}"
+    # Not `shift 2 || ...`: in dash, a shift past the end exits the script.
+    if [ $# -ge 2 ]; then shift 2; else shift; fi
+    # Root runs this for the installer; only a plain connector name gets
+    # through to hyprctl.
+    case "$monitor" in
+        *[!A-Za-z0-9-]*) monitor="" ;;
+    esac
+fi
+
+client_name="${1:?usage: vpinos-launch [--monitor <screen>] <name> <command> [args...]}"
 shift
 
 # On kmscon (tty1's console, see /usr/libexec/vpinos/vpinos-kmscon), the
@@ -50,7 +69,8 @@ shift
 # keeps TERM, so the installer's `sudo vpinos-launch` is covered too.
 if [ "$TERM" = kmscon ] && [ -z "$SSH_CONNECTION" ] && [ -z "$VPINOS_KMSCON_GUI" ]; then
     export VPINOS_KMSCON_GUI=1
-    exec /usr/bin/kmscon-launch-gui "$0" "$client_name" "$@"
+    # shellcheck disable=SC2086
+    exec /usr/bin/kmscon-launch-gui "$0" ${monitor:+--monitor $monitor} "$client_name" "$@"
 fi
 
 # Over SSH, kmscon-launch-gui can't help: it talks to kmscon through
@@ -80,7 +100,8 @@ if [ -n "$SSH_CONNECTION" ] && [ -z "$VPINOS_SSH_CONSOLE" ] \
     sudo -n /usr/libexec/vpinos/vpinos-console-ssh.sh stop
     trap ':' INT HUP TERM
     rc=0
-    "$0" "$client_name" "$@" || rc=$?
+    # shellcheck disable=SC2086
+    "$0" ${monitor:+--monitor $monitor} "$client_name" "$@" || rc=$?
     : >"/run/user/$(id -u)/vpinos-skip-boot-mode" 2>/dev/null || true
     sudo -n /usr/libexec/vpinos/vpinos-console-ssh.sh start
     exit "$rc"
@@ -237,6 +258,22 @@ apply_table_rotation() {
 maximize_first_window() {
     HYPRLAND_INSTANCE_SIGNATURE=$(find_hypr_instance) || return 0
     export HYPRLAND_INSTANCE_SIGNATURE
+    if ! address=$(wait_first_window); then
+        echo "$(date -Is): vpinos-launch: no $client_name window to maximize after 20s" >>"$log_file"
+        return 0
+    fi
+    set -- $address
+    hyprctl dispatch focuswindow "address:$1" >/dev/null 2>&1 || true
+    if [ "${2:-0}" = 0 ]; then
+        hyprctl dispatch fullscreen 1 >/dev/null 2>&1 || true
+    fi
+    echo "$(date -Is): vpinos-launch: maximized $client_name's window $1" >>"$log_file"
+    return 0
+}
+
+# Prints "<address> <fullscreen>" of the first mapped window, waiting up
+# to 20s for one. Needs HYPRLAND_INSTANCE_SIGNATURE set.
+wait_first_window() {
     i=0
     while [ "$i" -lt 80 ]; do
         address=$(hyprctl -j clients 2>/dev/null | python3 -c '
@@ -251,18 +288,38 @@ for c in clients:
         break
 ')
         if [ -n "$address" ]; then
-            set -- $address
-            hyprctl dispatch focuswindow "address:$1" >/dev/null 2>&1 || true
-            if [ "${2:-0}" = 0 ]; then
-                hyprctl dispatch fullscreen 1 >/dev/null 2>&1 || true
-            fi
-            echo "$(date -Is): vpinos-launch: maximized $client_name's window $1" >>"$log_file"
+            echo "$address"
             return 0
         fi
         sleep 0.25
         i=$((i + 1))
     done
-    echo "$(date -Is): vpinos-launch: no $client_name window to maximize after 20s" >>"$log_file"
+    return 1
+}
+
+# --monitor: moves the client's first window to the picked screen. Done
+# after the window maps, not by focusing the screen before the client
+# starts: hyprland.conf's `exec-once = hyprctl dispatch workspace 1`
+# could run after that focus and pull it back to workspace 1's screen.
+# The screen is focused too, so the dialogs the client opens later (the
+# installer's "Cancel Installation?") come up there as well. Runs in the
+# background, best-effort: on a failure the window stays where it is.
+move_to_monitor() {
+    HYPRLAND_INSTANCE_SIGNATURE=$(find_hypr_instance) || return 0
+    export HYPRLAND_INSTANCE_SIGNATURE
+    if ! address=$(wait_first_window); then
+        echo "$(date -Is): vpinos-launch: no $client_name window to move to $monitor after 20s" >>"$log_file"
+        return 0
+    fi
+    set -- $address
+    hyprctl dispatch focuswindow "address:$1" >/dev/null 2>&1 || true
+    if hyprctl dispatch movewindow "mon:$monitor" 2>&1 | grep -qx ok; then
+        hyprctl dispatch centerwindow >/dev/null 2>&1 || true
+        hyprctl dispatch focusmonitor "$monitor" >/dev/null 2>&1 || true
+        echo "$(date -Is): vpinos-launch: moved $client_name's window $1 to $monitor" >>"$log_file"
+    else
+        echo "$(date -Is): vpinos-launch: couldn't move $client_name's window $1 to $monitor" >>"$log_file"
+    fi
     return 0
 }
 
@@ -328,6 +385,7 @@ launch_client() {
     case "$client_name" in
         x11 | windowed) maximize_first_window & ;;
     esac
+    [ -z "$monitor" ] || move_to_monitor &
     echo "$(date -Is): vpinos-launch: launching $client_name -- $display_label -- $*" >>"$log_file"
     # stdbuf -oL -eL: output redirected to a file (not a terminal)
     # normally switches C stdio from line-buffered to fully-buffered,

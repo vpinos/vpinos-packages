@@ -197,9 +197,22 @@ action_update() {
     pause
 }
 
+# $1, optional: the screen the installer opens on (a DRM connector name
+# such as DP-1), picked in the Textual menu like vpinos-config's.
+# Calamares can't move itself, so vpinos-launch --monitor moves its
+# window there once it maps.
 action_install() {
-    log "selected top/install-vpinos"
-    sudo /usr/bin/vpinos-launch installer /usr/bin/calamares
+    case "${1:-}" in
+        "")
+            log "selected top/install-vpinos"
+            sudo /usr/bin/vpinos-launch installer /usr/bin/calamares ;;
+        *[!A-Za-z0-9-]*)
+            log "selected top/install-vpinos, bad screen name: $1"
+            sudo /usr/bin/vpinos-launch installer /usr/bin/calamares ;;
+        *)
+            log "selected top/install-vpinos on $1"
+            sudo /usr/bin/vpinos-launch --monitor "$1" installer /usr/bin/calamares ;;
+    esac
     log "vpinos-launch exited $?"
 }
 
