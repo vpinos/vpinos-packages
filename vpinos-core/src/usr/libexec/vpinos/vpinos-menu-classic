@@ -221,10 +221,11 @@ setup_submenu() {
         echo "4) Network Settings"
         echo "5) VPXConfig (Advanced VPinball Configuration)"
         echo "6) VPinFE Map Controls"
+        echo "7) VPinFE 3.0 Beta: $(vpinfe_beta_state)"
         if settings_kept; then
             bcur=$(cat /etc/vpinos/boot-mode 2>/dev/null)
             [ -z "$bcur" ] && bcur=menu
-            echo "7) Boot on startup: $bcur"
+            echo "8) Boot on startup: $bcur"
         fi
         echo "q) Back"
         echo "=============================="
@@ -236,7 +237,30 @@ setup_submenu() {
             4) action_network ;;
             5) action_vpxconfig ;;
             6) action_vpinfe_map_controls ;;
-            7) if settings_kept; then boot_mode_submenu; else invalid; fi ;;
+            7) vpinfe_beta_submenu ;;
+            8) if settings_kept; then boot_mode_submenu; else invalid; fi ;;
+            q|Q) return ;;
+            *) invalid ;;
+        esac
+    done
+}
+
+vpinfe_beta_submenu() {
+    while true; do
+        clear
+        print_logo
+        echo "       VPinFE 3.0 Beta"
+        echo "=============================="
+        echo "Currently: $(vpinfe_beta_state)"
+        echo
+        echo "1) Join (install the VPinFE 3.0 beta)"
+        echo "2) Leave (back to VPinFE 2.x)"
+        echo "q) Back"
+        echo "=============================="
+        choose
+        case "$choice" in
+            1) clear; action_vpinfe_beta join; return ;;
+            2) clear; action_vpinfe_beta leave; return ;;
             q|Q) return ;;
             *) invalid ;;
         esac

@@ -16,9 +16,12 @@
 # has a last "VPinball Mode" option (Desktop/Cabinet) that Save writes
 # straight into vpinball's own VPinballX.ini (BGSet, plus
 # BackglassOutput/ScoreViewOutput based on which roles got assigned).
-# With more than one monitor, Save also writes vpinfe's own
-# tablescreenid/bgscreenid/dmdscreenid in vpinfe.ini to each role's
-# monitor ID. Selecting Cabinet mode reveals three more sections
+# With more than one monitor, Save also writes vpinfe's own screen ids
+# to each role's monitor ID: tablescreenid/bgscreenid/dmdscreenid in
+# vpinfe.ini for VPinFE 2.x, or windows.playfield/backglass/scoreview
+# .screen_id in vpinfe.json for 3.0 (see save_vpinfe_settings). Every
+# Save also widens the three VPinFE windowrules in hyprland.conf to match
+# both versions' window names (see VPINFE_WINDOW_RULES). Selecting Cabinet mode reveals three more sections
 # (CabinetAutofitMode; a Full DMD on/off checkbox for
 # ScoreViewDMDOverlay/ScoreViewDMDAutoPos/B2SHideGrill; and
 # ScreenWidth/ScreenHeight/ScreenInclination), all written to
@@ -253,6 +256,18 @@ FULLDMD_DESCRIPTION = (
 
 VPINFE_INI_PATH = os.path.expanduser("~/.config/vpinfe/vpinfe.ini")
 VPINFE_INI_KEY = {"Table": "tablescreenid", "Backglass": "bgscreenid", "DMD": "dmdscreenid"}
+# VPinFE 3.0 keeps its settings in vpinfe.json (it converts vpinfe.ini on
+# its first start and keeps the ini), one window per role under
+# settings.windows.
+VPINFE_JSON_PATH = os.path.expanduser("~/.config/vpinfe/vpinfe.json")
+VPINFE_JSON_WINDOW = {"Table": "playfield", "Backglass": "backglass", "DMD": "scoreview"}
+# hyprland.conf's VPinFE windowrules, by Chrome's window class, which
+# comes from the window's URL (/app/<window>): 2.x's name, then 3.0's.
+# Save rewrites these three match:class lines -- whether they still have
+# a cabinet's original 2.x-only pattern or this one already -- so a
+# hyprland.conf seeded before 3.0 routes 3.0's windows too. Same patterns
+# as the defaults (/usr/share/vpinos/defaults/etc/vpinos/hyprland.conf).
+VPINFE_WINDOW_RULES = [("table", "playfield"), ("bg", "backglass"), ("dmd", "scoreview")]
 
 
 def ensure_instance_signature():
@@ -401,6 +416,26 @@ def save_marker_block(begin_marker, end_marker, lines):
 
 def save_workspace_lines(lines):
     save_marker_block(BEGIN_MARKER, END_MARKER, lines)
+
+
+def save_vpinfe_window_rules():
+    # Only the three VPinFE match:class lines, matched exactly (old
+    # pattern or new); every other line stays as it is. Written only when
+    # something changed, so running it again does nothing.
+    with open(HYPRLAND_CONF) as f:
+        content = f.read()
+    new_content = content
+    for old, new in VPINFE_WINDOW_RULES:
+        alt = rf"(?:{old}|\({old}\|{new}\))"
+        line = re.compile(
+            rf"^([ \t]*match:class[ \t]*=[ \t]*)\^chrome-127\\\.0\\\.0\\\.1__app_{alt}-Default\$[ \t]*$",
+            re.MULTILINE,
+        )
+        pattern = rf"^chrome-127\.0\.0\.1__app_({old}|{new})-Default$"
+        new_content = line.sub(lambda m, p=pattern: m.group(1) + p, new_content)
+    if new_content != content:
+        with open(HYPRLAND_CONF, "w") as f:
+            f.write(new_content)
 
 
 # ---- monitor modes (resolution/refresh rate) --------------------------------
@@ -760,10 +795,36 @@ def save_vpinball_settings(
         f.write(content)
 
 
+def vpinfe_is_3x():
+    # The installed VPinFE's version, not which settings file exists: a
+    # cabinet that left the VPinFE 3.0 beta still has a vpinfe.json, but
+    # 2.x only reads vpinfe.ini.
+    try:
+        version = subprocess.run(
+            ["dpkg-query", "-W", "-f=${Version}", "vpinfe"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+        if not version:
+            return False
+        return subprocess.run(
+            ["dpkg", "--compare-versions", version, "ge", "3.0~"], timeout=10,
+        ).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def save_vpinfe_settings(role_to_monitor, id_by_monitor):
     # Only called with more than one monitor detected -- with a single
     # screen everything already renders there regardless of these ids,
-    # so there's nothing meaningful to set. vpinfe.ini ships baked into
+    # so there's nothing meaningful to set. Returns the file it wrote.
+    #
+    # VPinFE 3.0 with its vpinfe.json: that. Every other case writes
+    # vpinfe.ini -- 2.x, and also 3.0 before its first start, whose
+    # conversion then carries these ids into the JSON.
+    if vpinfe_is_3x() and os.path.exists(VPINFE_JSON_PATH):
+        save_vpinfe_json(role_to_monitor, id_by_monitor)
+        return "vpinfe.json"
+    # vpinfe.ini ships baked into
     # the image (home/vpinos/.config/vpinfe/), so unlike VPinballX.ini
     # there's no "generate a default first" step -- if it's missing,
     # that's a real problem worth surfacing, not something to paper
@@ -778,6 +839,33 @@ def save_vpinfe_settings(role_to_monitor, id_by_monitor):
             content = set_ini_value(content, key, id_by_monitor[name])
     with open(VPINFE_INI_PATH, "w") as f:
         f.write(content)
+    return "vpinfe.ini"
+
+
+def save_vpinfe_json(role_to_monitor, id_by_monitor):
+    # settings.windows.<window>.screen_id, an integer. In 3.0 an empty
+    # backglass/scoreview screen_id means VPinFE doesn't open that window
+    # at all, so a role nobody has is cleared to "" -- the playfield
+    # always has one (VPinFE's default is 0) and is left alone. Every
+    # other key stays as VPinFE wrote it. Written to a temporary file
+    # first and renamed over, so VPinFE never reads a half-written file.
+    with open(VPINFE_JSON_PATH) as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{VPINFE_JSON_PATH} isn't a JSON object")
+    windows = data.setdefault("settings", {}).setdefault("windows", {})
+    for role, window in VPINFE_JSON_WINDOW.items():
+        name = role_to_monitor.get(role)
+        entry = windows.setdefault(window, {})
+        if name:
+            entry["screen_id"] = int(id_by_monitor[name])
+        elif role != "Table":
+            entry["screen_id"] = ""
+    tmp = VPINFE_JSON_PATH + ".vpinos-config.tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, VPINFE_JSON_PATH)
 
 
 # ---- Sound ------------------------------------------------------------------
@@ -1062,6 +1150,7 @@ class App:
         lines = build_workspace_lines(role_to_monitor)
         try:
             save_workspace_lines(lines)
+            save_vpinfe_window_rules()
         except OSError as exc:
             return {"error": f"ERROR saving hyprland.conf: {exc}"}
         except RuntimeError as exc:
@@ -1110,10 +1199,9 @@ class App:
         if len(self.monitors) > 1:
             id_by_monitor = {mon["name"]: mon["id"] for mon in self.monitors}
             try:
-                save_vpinfe_settings(role_to_monitor, id_by_monitor)
-                saved += " and vpinfe.ini"
-            except (OSError, RuntimeError) as exc:
-                return {"error": f"Saved {saved}, but ERROR saving vpinfe.ini: {exc}"}
+                saved += " and " + save_vpinfe_settings(role_to_monitor, id_by_monitor)
+            except (OSError, RuntimeError, ValueError) as exc:
+                return {"error": f"Saved {saved}, but ERROR saving VPinFE's settings: {exc}"}
 
         audio = body.get("audio") or {}
         sound = None

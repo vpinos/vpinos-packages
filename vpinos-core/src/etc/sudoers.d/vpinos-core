@@ -85,6 +85,12 @@
 # as every other rule above.
 %sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-update.sh
 
+# vpinos-menu's Setup > VPinFE 3.0 Beta option -- adding/removing the
+# beta channel source and installing VPinFE need root. Scoped to this
+# one dedicated script, which only ever touches the beta source and the
+# vpinfe package, same narrow-scope reasoning as every other rule above.
+%sudo ALL=(ALL) NOPASSWD: /usr/libexec/vpinos/vpinos-vpinfe-beta-setup.sh
+
 # vpinos-menu's Tools > VPX Editor option, when VPX Editor isn't
 # installed yet -- apt-get install needs root. Scoped to this one
 # dedicated script, which only ever installs the vpx-editor package,

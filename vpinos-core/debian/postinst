@@ -28,7 +28,43 @@ seed() {
     touch "$stamp"
 }
 
+# VPinFE's default settings and theme for the `vpinos` user, chosen by
+# the installed VPinFE's version. Runs at configure, and again whenever
+# the vpinfe package is installed, upgraded or downgraded: dpkg calls
+# this script with `triggered` for that (debian/vpinos-core.triggers), so
+# it doesn't matter which of vpinos-core and vpinfe arrives first.
+#
+#   2.x  vpinfe.ini and themes/Revolution, seeded once like the rest.
+#   3.0  nothing here. On its first start VPinFE converts vpinfe.ini to
+#        vpinfe.json (keeping the ini, so going back to 2.x finds it),
+#        copies themes/ into frontend_themes/ and downloads Revolution
+#        2.0.0. Seeding a vpinfe.json here would stop that conversion,
+#        because VPinFE only converts when there's no vpinfe.json.
+#   A fresh install with 3.0 (no vpinfe.ini, no vpinfe.json) gets its own
+#   defaults once the ISO ships 3.0 -- not yet: until then every cabinet
+#   on 3.0 got there from 2.x through the beta.
+setup_vpinfe() {
+    getent passwd vpinos >/dev/null || return 0
+    home=$(getent passwd vpinos | cut -d: -f6)
+    [ -d "$home" ] || return 0
+    case "$(dpkg-query -W -f='${db:Status-Status}' vpinfe 2>/dev/null || true)" in
+        "" | not-installed | config-files) return 0 ;;
+    esac
+    version=$(dpkg-query -W -f='${Version}' vpinfe 2>/dev/null || true)
+    [ -n "$version" ] || return 0
+    install -d -o vpinos -g vpinos "$home/.config" "$home/.config/vpinfe"
+    if dpkg --compare-versions "$version" lt 3.0~; then
+        install -d -o vpinos -g vpinos "$home/.config/vpinfe/themes"
+        seed "$home/.config/vpinfe/vpinfe.ini" vpinos:vpinos 0644
+        seed "$home/.config/vpinfe/themes/Revolution" vpinos:vpinos
+    fi
+}
+
 case "$1" in
+    triggered)
+        setup_vpinfe
+        ;;
+
     configure)
         mkdir -p /etc/vpinos
         # hyprland-installer.conf is no longer seeded: hyprland.conf's
@@ -48,13 +84,7 @@ case "$1" in
             seed /etc/vpinos/hyprland.conf vpinos:vpinos 0644
             seed /etc/vpinos/table-rotation.conf vpinos:vpinos 0644
 
-            home=$(getent passwd vpinos | cut -d: -f6)
-            if [ -d "$home" ]; then
-                install -d -o vpinos -g vpinos "$home/.config" \
-                    "$home/.config/vpinfe" "$home/.config/vpinfe/themes"
-                seed "$home/.config/vpinfe/vpinfe.ini" vpinos:vpinos 0644
-                seed "$home/.config/vpinfe/themes/Revolution" vpinos:vpinos
-            fi
+            setup_vpinfe
 
             # The menu, launcher and fetch service append to these as
             # `vpinos`; a non-root process can append to an existing

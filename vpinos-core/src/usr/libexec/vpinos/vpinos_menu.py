@@ -193,6 +193,11 @@ def vpx_editor_state() -> str:
     return "not installed"
 
 
+def vpinfe_beta_state() -> str:
+    """joined or off (vpinos-vpinfe-beta-setup.sh status)."""
+    return output("/usr/libexec/vpinos/vpinos-vpinfe-beta-setup.sh", "status") or "off"
+
+
 def vpxtool_state() -> str:
     if output("/usr/libexec/vpinos/vpinos-vpxtool-setup.sh", "status") == "installed":
         return ""
@@ -538,7 +543,7 @@ class MainScreen(MenuScreen):
     def items(self) -> list[Optional[Item]]:
         items: list[Optional[Item]] = [
             Item("1", "Setup", self.open(SetupScreen),
-                 help="Screens, GPU driver, network, VPinball and VPinFE settings."),
+                 help="Screens, GPU driver, network, VPinball and VPinFE settings, the VPinFE beta."),
         ]
         if is_installed():
             items += [
@@ -615,9 +620,11 @@ class SetupScreen(MenuScreen):
                  help="Advanced VPinball configuration (VPinballX.ini)."),
             Item("6", "VPinFE Map Controls", self.terminal("vpinfe-map-controls"),
                  help="Map your buttons and controller in VPinFE."),
+            Item("7", "VPinFE 3.0 Beta", self.open(VpinfeBetaScreen), value=vpinfe_beta_state(),
+                 help="Try the VPinFE 3.0 beta, or go back to VPinFE 2.x."),
         ]
         if settings_kept():
-            items.append(Item("7", "Boot on startup", self.open(BootModeScreen), value=boot_mode(),
+            items.append(Item("8", "Boot on startup", self.open(BootModeScreen), value=boot_mode(),
                               help="What starts when the cabinet is switched on."))
         return items + [SEPARATOR, self.back_item()]
 
@@ -715,6 +722,25 @@ class BootModeScreen(ChoiceScreen):
 
     def current_value(self) -> str:
         return boot_mode()
+
+
+class VpinfeBetaScreen(MenuScreen):
+    """Join or Leave, each run in the terminal: they install through apt,
+    whose output has to stay visible (vpinos-vpinfe-beta-setup.sh). The
+    action asks before it changes anything."""
+
+    title_text = "VPinFE 3.0 Beta"
+
+    def items(self) -> list[Optional[Item]]:
+        joined = vpinfe_beta_state() == "joined"
+        return [
+            Item("1", "Join", self.terminal("vpinfe-beta", "join"), marked=joined,
+                 help="Install the VPinFE 3.0 beta; Update VPinOS keeps it on the newest beta."),
+            Item("2", "Leave", self.terminal("vpinfe-beta", "leave"), marked=not joined,
+                 help="Go back to VPinFE 2.x with your settings from before the beta."),
+            SEPARATOR,
+            self.back_item(),
+        ]
 
 
 class SshPasswordAuthScreen(ChoiceScreen):

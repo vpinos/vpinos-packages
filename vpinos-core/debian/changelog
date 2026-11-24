@@ -1,3 +1,23 @@
+vpinos-core (1.1.32) trixie; urgency=medium
+
+  * Setup has a new item, VPinFE 3.0 Beta, for trying the VPinFE 3.0
+    beta before it's released. Join installs the newest beta, and Update
+    VPinOS then keeps the cabinet on the newest beta and moves it to
+    VPinFE 3.0 when that's released. Leave goes back to VPinFE 2.x. It
+    needs internet, works on amd64 and arm64, and on the live USB it's
+    lost on reboot. Boot on startup moves to item 8.
+  * VPinFE 3.0 converts its settings to a new file on its first start,
+    and keeps the old one, so Leave brings back the settings from before
+    the beta. VPinOS Configuration now writes VPinFE's screens to
+    whichever file the installed VPinFE uses.
+  * VPinFE 3.0 names its windows differently. Saving in VPinOS
+    Configuration now updates the cabinet's screen rules so VPinFE's
+    windows reach the right screens with either version. After joining
+    the beta on a cabinet with more than one screen, open VPinOS
+    Configuration and Save once.
+
+ -- Superhac <superhac007@gmail.com>  Tue, 24 Nov 2026 07:44:46 -0600
+
 vpinos-core (1.1.31) trixie; urgency=medium
 
   * With an NVIDIA driver (NVIDIA proprietary or NVIDIA legacy), the menu

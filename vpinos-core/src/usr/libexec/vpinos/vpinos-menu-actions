@@ -259,6 +259,56 @@ action_vpinfe_map_controls() {
     launch vpinfe-gamepadtest /opt/vpinfe/vpinfe --gamepadtest
 }
 
+vpinfe_beta_state() {
+    /usr/libexec/vpinos/vpinos-vpinfe-beta-setup.sh status 2>/dev/null
+}
+
+# Setup > VPinFE 3.0 Beta: join or leave the VPinFE beta channel (see
+# vpinos-vpinfe-beta-setup.sh). Runs straight in this tty, like VPX
+# Editor's install, so the apt output stays visible.
+action_vpinfe_beta() {
+    case "$1" in
+        join)
+            log "selected setup/vpinfe-beta join"
+            echo "VPinFE 3.0 Beta"
+            echo
+            echo "Installs the newest VPinFE 3.0 beta (~120 MB download, needs internet)."
+            echo "Update VPinOS then keeps you on the newest beta, and moves you to"
+            echo "VPinFE 3.0 when it's released. VPinFE 3.0 converts your VPinFE"
+            echo "settings on its first start and keeps the old ones, so Leave can go"
+            echo "back to VPinFE 2.x."
+            if ! is_installed; then
+                echo "Live USB: it will be lost on reboot."
+            fi
+            echo
+            printf "Join the beta? [y/N]: "
+            ;;
+        leave)
+            log "selected setup/vpinfe-beta leave"
+            if [ "$(vpinfe_beta_state)" != joined ]; then
+                echo "This cabinet isn't in the VPinFE beta."
+                pause
+                return
+            fi
+            echo "VPinFE 3.0 Beta"
+            echo
+            echo "Goes back to VPinFE 2.x (needs internet), with your VPinFE settings"
+            echo "from before the beta. Update VPinOS stops installing betas."
+            echo
+            printf "Leave the beta? [y/N]: "
+            ;;
+        *) echo "usage: vpinfe-beta join|leave" >&2; return 2 ;;
+    esac
+    read -r confirm
+    case "$confirm" in
+        y|Y) ;;
+        *) log "vpinfe-beta $1 cancelled"; return ;;
+    esac
+    sudo /usr/libexec/vpinos/vpinos-vpinfe-beta-setup.sh "$1"
+    log "vpinos-vpinfe-beta-setup.sh $1 exited $?"
+    pause
+}
+
 # Rotates the text console for a portrait-mounted Table screen (fbcon's
 # numbering: 0 normal, 3 90 Left, 1 90 Right). Separate from
 # vpinos-config's Table Screen Rotation, which only rotates what
